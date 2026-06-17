@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Models (too large for git, download separately)
+models/*.pt
+models/*.pth
+models/*.onnx
+
+# OSAM cache
+.osam/
+
+# YOLO outputs
+runs/
+
+# Datasets / images (optional — choose one)
+# data/raw/        # photos are large, keep local
+# data/split/      # cropped outputs
+output/dataset/
+
+# OS
+.DS_Store
+Thumbs.db
