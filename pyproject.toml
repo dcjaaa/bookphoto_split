@@ -1,0 +1,26 @@
+[project]
+name = "bookphoto-split"
+version = "0.1.0"
+description = "BookPhoto Split — 图书盘点系统：书脊分割、OCR识别、馆藏匹配、去重计数"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "labelme",
+    "osam",
+    "ultralytics",
+    "opencv-python-headless",
+    "numpy",
+    "pandas",
+    "openpyxl",
+    "pyqt5",
+    "httpx",
+    "openai",
+    "python-dotenv",
+    "scikit-image",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "python-multipart>=0.0.9",
+]
+
+[tool.uv]
+index-url = "https://pypi.tuna.tsinghua.edu.cn/simple"

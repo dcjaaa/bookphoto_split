@@ -4,6 +4,13 @@ __pycache__/
 *.pyo
 .venv/
 venv/
+.venv-paddle/
+
+# uv 锁文件（前端同学不用 uv，不入库）
+uv.lock
+
+# Python 版本标记（不强制版本）
+.python-version
 
 # IDE
 .idea/
@@ -14,6 +21,8 @@ venv/
 models/*.pt
 models/*.pth
 models/*.onnx
+yolo11s-seg.pt
+yolo26n.pt
 
 # OSAM cache
 .osam/
@@ -21,10 +30,17 @@ models/*.onnx
 # YOLO outputs
 runs/
 
-# Datasets / images (optional — choose one)
-# data/raw/        # photos are large, keep local
-# data/split/      # cropped outputs
+# Datasets / images (local, not tracked)
+data/
 output/dataset/
+
+# OCR
+*.env
+
+# 临时文件
+train.log
+predict_sources.txt
+*.tmp
 
 # OS
 .DS_Store
