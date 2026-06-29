@@ -23,7 +23,7 @@ CROPS_PREDICT_DIR = DATA_DIR / "crops_yolo"  # 从 YOLO 预测裁剪 (原 split_
 
 # === catalog 文件 ===
 CATALOG_FILE = CATALOG_DIR / "titles.json"
-CATALOG_CLEANED_FILE = CATALOG_DIR / "titles_cleaned.json"
+CATALOG_RAW_FILE = CATALOG_DIR / "titles1.json"  # 原始未清洗备份(供 clean_catalog.py 读取)
 
 # === output/ ===
 OUTPUT_DIR = PROJECT_ROOT / "output"

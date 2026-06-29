@@ -1,5 +1,5 @@
 """
-清洗馆藏目录 titles.json。
+清洗馆藏目录 titles1.json → titles.json。
 
 处理:
     1. HTML 实体反转义 (html.unescape): &quot; → "
@@ -7,7 +7,8 @@
     3. 去重 (保留首次出现)
     4. 去除空字符串
 
-输出: data/catalog/titles_cleaned.json
+输入: data/catalog/titles1.json (原始未清洗)
+输出: data/catalog/titles.json (清洗后，供匹配使用)
 
 用法:
     python -m scripts.match.clean_catalog
@@ -18,10 +19,10 @@ import json
 import sys
 from pathlib import Path
 
-from scripts.utils.paths import CATALOG_FILE, CATALOG_CLEANED_FILE
+from scripts.utils.paths import CATALOG_FILE, CATALOG_RAW_FILE
 
-INPUT_FILE = CATALOG_FILE
-OUTPUT_FILE = CATALOG_CLEANED_FILE
+INPUT_FILE = CATALOG_RAW_FILE
+OUTPUT_FILE = CATALOG_FILE
 
 
 def clean_titles(titles: list[str]) -> list[str]:

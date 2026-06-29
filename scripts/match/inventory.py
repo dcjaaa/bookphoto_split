@@ -4,14 +4,13 @@
 优化:
     - rapidfuzz 替换 SequenceMatcher (快 ~100x)
     - 候选集过滤: 首字符 + 长度区间，缩小扫描范围
-    - 优先用 titles_cleaned.json (清洗后的馆藏目录)
     - 主标题提取: 去版本号/副标题/丛书名，应对 OCR 书名比馆藏长的问题
     - 多策略匹配: 精确>主标题精确>前缀>包含>partial>ratio
     - match_log 含 score/strategy/needs_review 字段，便于调阈值和人工确认
 
 流程:
     1. 加载 OCR 识别结果 (data/ocr_results/)
-    2. 加载馆藏目录 (data/catalog/titles_cleaned.json)
+    2. 加载馆藏目录 (data/catalog/titles.json)
     3. 模糊匹配书名 → 纠正 OCR 错误
     4. 统计每本书的数量（去重计数）
     5. 输出盘点结果 (output/inventory_result.json)
@@ -30,11 +29,8 @@ from rapidfuzz import fuzz
 
 from scripts.utils.paths import (
     OCR_RESULTS_DIR, CATALOG_DIR, OUTPUT_DIR,
-    CATALOG_FILE, CATALOG_CLEANED_FILE, INVENTORY_RESULT_FILE,
+    CATALOG_FILE, INVENTORY_RESULT_FILE,
 )
-
-CATALOG_PRIMARY = CATALOG_CLEANED_FILE
-CATALOG_FILE_FALLBACK = CATALOG_FILE
 
 MIN_NAME_LEN = 2
 MAIN_MIN_LEN = 3
@@ -98,12 +94,11 @@ def load_ocr_results() -> list[dict]:
 
 
 def load_catalog() -> list[str]:
-    src = CATALOG_PRIMARY if CATALOG_PRIMARY.exists() else CATALOG_FILE_FALLBACK
-    if not src.exists():
-        print(f"Error: {src} not found.")
+    if not CATALOG_FILE.exists():
+        print(f"Error: {CATALOG_FILE} not found.")
         print("  Run: python -m scripts.match.clean_catalog to generate cleaned titles")
         sys.exit(1)
-    return json.loads(src.read_text(encoding="utf-8"))
+    return json.loads(CATALOG_FILE.read_text(encoding="utf-8"))
 
 
 def build_catalog_index(catalog: list[str]) -> dict:
