@@ -2,30 +2,22 @@
 PaddleOCR 管线：通过 subprocess 调用 .venv-paddle 下的 PaddleOCR
 
 使用方法（在主 .venv 下运行）:
-    python -m scripts.ocr.paddle_ocr_pipeline --start 1 --end 10
-    python -m scripts.ocr.paddle_ocr_pipeline --photo_id 5
-    python -m scripts.ocr.paddle_ocr_pipeline --batch
-    python -m scripts.ocr.paddle_ocr_pipeline --retry-failed
+    python -m scripts.ocr.paddle_pipeline --start 1 --end 10
+    python -m scripts.ocr.paddle_pipeline --photo_id 5
+    python -m scripts.ocr.paddle_pipeline --batch
+    python -m scripts.ocr.paddle_pipeline --retry-failed
 """
 
 import argparse
 import json
 import subprocess
-import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from scripts.utils.paths import SPLIT_DIR, DATA_DIR
-
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-PADDLE_VENV_PYTHON = PROJECT_ROOT / ".venv-paddle" / "bin" / "python"
-PADDLE_OCR_CLI = PROJECT_ROOT / "scripts" / "ocr" / "paddle_ocr_cli.py"
-
-PADDLE_OCR_RESULTS_DIR = DATA_DIR / "paddle_ocr_results"
+from scripts.utils.paths import CROPS_LABELED_DIR, PADDLE_OCR_RESULTS_DIR, PADDLE_VENV_PYTHON, PADDLE_CLI
 
 
 def run_paddle_ocr_single(image_path: str, no_rotate: bool = False, use_gpu: bool = True) -> dict:
-    cmd = [str(PADDLE_VENV_PYTHON), str(PADDLE_OCR_CLI), "--image", image_path]
+    cmd = [str(PADDLE_VENV_PYTHON), str(PADDLE_CLI), "--image", image_path]
     if no_rotate:
         cmd.append("--no-rotate")
     if not use_gpu:
@@ -47,7 +39,7 @@ def run_paddle_ocr_single(image_path: str, no_rotate: bool = False, use_gpu: boo
 def run_paddle_ocr_batch(input_dir: str, output_dir: str, no_rotate: bool = False, use_gpu: bool = True):
     cmd = [
         str(PADDLE_VENV_PYTHON),
-        str(PADDLE_OCR_CLI),
+        str(PADDLE_CLI),
         "--input", input_dir,
         "--output", output_dir,
     ]
@@ -60,7 +52,7 @@ def run_paddle_ocr_batch(input_dir: str, output_dir: str, no_rotate: bool = Fals
 
 
 def process_photo(photo_id: int, use_gpu: bool = True) -> dict:
-    spine_dir = SPLIT_DIR / str(photo_id)
+    spine_dir = CROPS_LABELED_DIR / str(photo_id)
     if not spine_dir.exists():
         return {"photo_id": photo_id, "spines": [], "error": "spine directory not found"}
 
@@ -98,13 +90,13 @@ def main():
 
     if not PADDLE_VENV_PYTHON.exists():
         print(f"Error: PaddleOCR venv not found at {PADDLE_VENV_PYTHON}")
-        print("Run: uv venv .venv-paddle --python 3.13")
-        sys.exit(1)
+        print("Run: uv venv .venv-paddle --python 3.13 && uv pip install -r paddle-requirements.txt -p .venv-paddle")
+        return
 
     if args.batch:
         output_dir = args.output_dir or str(PADDLE_OCR_RESULTS_DIR / "split")
-        print(f"Batch OCR: {SPLIT_DIR} -> {output_dir}")
-        run_paddle_ocr_batch(str(SPLIT_DIR), output_dir, use_gpu=use_gpu)
+        print(f"Batch OCR: {CROPS_LABELED_DIR} -> {output_dir}")
+        run_paddle_ocr_batch(str(CROPS_LABELED_DIR), output_dir, use_gpu=use_gpu)
         return
 
     PADDLE_OCR_RESULTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -117,9 +109,9 @@ def main():
         print(f"Photo {args.photo_id}: {n_text}/{len(result['spines'])} spines with text -> {out_file}")
         return
 
-    split_dirs = sorted([d for d in SPLIT_DIR.iterdir() if d.is_dir()], key=lambda d: int(d.name))
+    split_dirs = sorted([d for d in CROPS_LABELED_DIR.iterdir() if d.is_dir()], key=lambda d: int(d.name))
     if not split_dirs:
-        print(f"No split directories found in {SPLIT_DIR}")
+        print(f"No split directories found in {CROPS_LABELED_DIR}")
         return
 
     end_idx = args.end if args.end else len(split_dirs)

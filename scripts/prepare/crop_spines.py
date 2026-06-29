@@ -1,21 +1,19 @@
 """
-标注完成后 → 自动裁剪每本书脊到 data/split/{n}/
+标注完成后 → 自动裁剪每本书脊到 data/crops_labelme/{n}/
 
 用法:
-    python scripts/crop_spines_from_labelme.py
-    python scripts/crop_spines_from_labelme.py --image 5
+    python -m scripts.prepare.crop_spines
+    python -m scripts.prepare.crop_spines --image 5
 """
 
 import argparse
 import json
-import sys
 from pathlib import Path
 
 import cv2
-import numpy as np
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from utils.paths import RAW_DIR, ANNOTATIONS_DIR, SPLIT_DIR
+from scripts.utils.paths import RAW_DIR, ANNOTATIONS_DIR, CROPS_LABELED_DIR
+from scripts.utils.crop import polygon_to_mask, polygon_bbox, crop_with_mask
 
 
 def crop_one_image(json_path: Path) -> int:
@@ -42,27 +40,17 @@ def crop_one_image(json_path: Path) -> int:
         return 0
 
     h, w = img.shape[:2]
-    out_dir = SPLIT_DIR / name
+    out_dir = CROPS_LABELED_DIR / name
     out_dir.mkdir(parents=True, exist_ok=True)
 
     cropped = 0
     for shape in shapes:
-        pts = np.array(shape["points"], dtype=np.int32)
-        x1, y1 = max(0, int(pts[:, 0].min())), max(0, int(pts[:, 1].min()))
-        x2, y2 = min(w, int(pts[:, 0].max())), min(h, int(pts[:, 1].max()))
-        if x2 <= x1 or y2 <= y1:
+        points = shape["points"]
+        bbox = polygon_bbox(points)
+        mask = polygon_to_mask(points, h, w)
+        result = crop_with_mask(img, mask, bbox, alpha=True)
+        if result is None:
             continue
-
-        full_mask = np.zeros((h, w), dtype=np.uint8)
-        cv2.fillPoly(full_mask, [pts], 255)
-        mask_crop = full_mask[y1:y2, x1:x2]
-        img_crop = img[y1:y2, x1:x2]
-        img_crop = cv2.bitwise_and(img_crop, img_crop, mask=mask_crop)
-
-        b, g, r = cv2.split(img_crop)
-        alpha = mask_crop
-        result = cv2.merge([b, g, r, alpha])
-
         out_path = out_dir / f"spine_{cropped:03d}.png"
         cv2.imwrite(str(out_path), result)
         cropped += 1
@@ -82,8 +70,8 @@ def crop_all(only_image: int | None = None):
 
     json_files = sorted(ANNOTATIONS_DIR.glob("*.json"), key=lambda f: int(f.stem))
     total = sum(crop_one_image(f) for f in json_files)
-    subdirs = [d for d in SPLIT_DIR.iterdir() if d.is_dir()]
-    print(f"\nDone: {len(json_files)} images -> {total} spines | {len(subdirs)} subdirs in {SPLIT_DIR}/")
+    subdirs = [d for d in CROPS_LABELED_DIR.iterdir() if d.is_dir()]
+    print(f"\nDone: {len(json_files)} images -> {total} spines | {len(subdirs)} subdirs in {CROPS_LABELED_DIR}/")
 
 
 if __name__ == "__main__":

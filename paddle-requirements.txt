@@ -1,3 +1,9 @@
+# PaddleOCR 独立依赖（运行在 .venv-paddle 环境）
+#
+# 安装方式:
+#   uv venv .venv-paddle --python 3.13
+#   uv pip install -r paddle-requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+
 paddlepaddle==3.0.0
 paddleocr>=3.7.0
 opencv-python-headless>=4.8

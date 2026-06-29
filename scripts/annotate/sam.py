@@ -9,22 +9,20 @@ SAM3 全自动批量标注（与 Labelme GUI 一致的参数和算法）
 输出: data/annotations/{n}.json (Labelme 多边形格式)
 
 用法:
-    python scripts/sam_annotate.py
-    python scripts/sam_annotate.py --start 1 --end 5
-    python scripts/sam_annotate.py --start 1 --end 5 --score 0.01
+    python -m scripts.annotate.sam
+    python -m scripts.annotate.sam --start 1 --end 5
+    python -m scripts.annotate.sam --start 1 --end 5 --score 0.01
 """
 
 import argparse
 import json
-import sys
 from pathlib import Path
 
 import cv2
 import numpy as np
 import skimage.measure
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from utils.paths import RAW_DIR, ANNOTATIONS_DIR
+from scripts.utils.paths import RAW_DIR, ANNOTATIONS_DIR
 
 from labelme._automation._osam_session import OsamSession
 from labelme._automation._text_detection import get_bboxes_from_texts, nms_bboxes
@@ -242,7 +240,7 @@ def run_batch(start_idx=1, end_idx=None, score=SCORE_THRESH, iou=IOU_THRESH):
     print(f"\nDone: {end_idx - start_idx + 1 - skipped} annotated, {skipped} skipped")
     print(f"Total spines: {total_spines}")
     print(f"Output: {ANNOTATIONS_DIR}/")
-    print(f"\nNext: python scripts/crop_spines_from_labelme.py")
+    print(f"\nNext: python -m scripts.prepare.crop_spines")
 
 
 if __name__ == "__main__":

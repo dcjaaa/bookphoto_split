@@ -20,7 +20,11 @@ dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
     "python-multipart>=0.0.9",
+    "rapidfuzz>=3.0",
 ]
 
-[tool.uv]
-index-url = "https://pypi.tuna.tsinghua.edu.cn/simple"
+[project.optional-dependencies]
+frontend = [
+    "pyqt5",
+    "httpx",
+]

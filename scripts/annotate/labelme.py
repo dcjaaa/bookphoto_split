@@ -2,8 +2,8 @@
 Labelme SAM 辅助标注脚本
 
 用法:
-    python scripts/labelme_book.py
-    python scripts/labelme_book.py --start 5
+    python -m scripts.annotate.labelme
+    python -m scripts.annotate.labelme --start 5
 
 快捷键:
     Ctrl+N  手动补画多边形     Ctrl+S  保存
@@ -13,11 +13,9 @@ Labelme SAM 辅助标注脚本
 
 import argparse
 import subprocess
-import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from utils.paths import RAW_DIR, ANNOTATIONS_DIR
+from scripts.utils.paths import RAW_DIR, ANNOTATIONS_DIR
 
 
 def launch_labelme(start_idx: int = 1):

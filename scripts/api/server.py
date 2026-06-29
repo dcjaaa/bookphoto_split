@@ -20,7 +20,6 @@ FastAPI 后端：把书脊分割 / OCR 识别 / 馆藏匹配 暴露为 HTTP 接�
 from __future__ import annotations
 
 import json
-import sys
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -29,8 +28,10 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from scripts.utils.paths import RAW_DIR, OCR_RESULTS_DIR, CATALOG_DIR
+from scripts.utils.paths import (
+    RAW_DIR, OCR_RESULTS_DIR, CATALOG_DIR, OUTPUT_DIR,
+    SEG_MODEL_PATH, CATALOG_FILE, INVENTORY_RESULT_FILE,
+)
 
 app = FastAPI(
     title="BookPhoto Split API",
@@ -44,10 +45,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-SEG_MODEL_PATH = Path(__file__).resolve().parent.parent.parent / "runs" / "segment" / "output" / "runs" / "book_spine_seg-2" / "weights" / "best.pt"
-CATALOG_FILE = CATALOG_DIR / "titles.json"
-RESULT_FILE = OCR_RESULTS_DIR.parent / "inventory_result.json"
 
 _seg_model = None
 
@@ -90,7 +87,7 @@ async def health():
 
 
 @app.post("/api/segment")
-async def segment(file: UploadFile = File(...), conf: float = 0.25, imgsz: int = 1280):
+async def segment(file: UploadFile = File(...), conf: float = 0.25, imgsz: int = 960):
     """上传书架照片 → YOLO 书脊分割。"""
     model = _get_seg_model()
     suffix = Path(file.filename or "img.jpg").suffix or ".jpg"
@@ -98,15 +95,26 @@ async def segment(file: UploadFile = File(...), conf: float = 0.25, imgsz: int =
         tmp.write(await file.read())
         tmp_path = Path(tmp.name)
     try:
-        results = model.predict(source=str(tmp_path), conf=conf, imgsz=imgsz, save=False)
+        results = model.predict(source=str(tmp_path), conf=conf, imgsz=imgsz, save=False, retina_masks=False)
         r = results[0]
+        masks_xy = r.masks.xy if r.masks is not None else []
         boxes = []
         if r.boxes is not None:
-            for b in r.boxes:
+            for i, b in enumerate(r.boxes):
+                polygon = None
+                if i < len(masks_xy) and len(masks_xy[i]) >= 3:
+                    pts = masks_xy[i]
+                    if len(pts) > 50:
+                        import cv2
+                        arc = cv2.arcLength(pts.astype("int32"), True)
+                        poly = cv2.approxPolyDP(pts.astype("int32"), 0.01 * arc, True).reshape(-1, 2)
+                        pts = poly.astype("float32")
+                    polygon = [[round(float(x), 1), round(float(y), 1)] for x, y in pts]
                 boxes.append({
                     "bbox": [round(float(x), 1) for x in b.xyxy[0].tolist()],
                     "confidence": round(float(b.conf[0]), 4),
                     "label": model.names[int(b.cls[0])],
+                    "polygon": polygon,
                 })
         return {
             "image_size": {"width": int(r.orig_shape[1]), "height": int(r.orig_shape[0])},
@@ -120,7 +128,7 @@ async def segment(file: UploadFile = File(...), conf: float = 0.25, imgsz: int =
 @app.post("/api/ocr")
 async def ocr(file: UploadFile = File(...)):
     """上传书架照片 → Qwen3-VL 识别书名+数量。"""
-    from scripts.api_ocr.ocr_pipeline import call_ocr_api
+    from scripts.ocr.qwen_pipeline import call_ocr_api
 
     suffix = Path(file.filename or "img.jpg").suffix or ".jpg"
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
@@ -165,11 +173,12 @@ async def list_ocr():
 @app.post("/api/inventory")
 async def inventory(req: InventoryRequest):
     """对给定 OCR 结果做馆藏匹配 + 去重计数。"""
-    from scripts.count.inventory import count_books
+    from scripts.match.inventory import count_books, build_catalog_index
 
     catalog = _load_catalog()
+    index = build_catalog_index(catalog)
     results = [r.model_dump() for r in req.results]
-    inv = count_books(results, catalog, req.threshold)
+    inv = count_books(results, index, req.threshold)
     return {
         "book_counts": inv["book_counts"],
         "match_log": inv["match_log"],
@@ -182,22 +191,23 @@ async def inventory(req: InventoryRequest):
 @app.get("/api/inventory/all")
 async def inventory_all(threshold: float = 0.6):
     """汇总全部已有 OCR 结果 → 盘点统计。"""
-    from scripts.count.inventory import count_books, load_ocr_results
+    from scripts.match.inventory import count_books, load_ocr_results, build_catalog_index
 
     results = load_ocr_results()
     if not results:
-        raise HTTPException(status_code=404, detail="无 OCR 结果，请先运行 ocr_pipeline")
+        raise HTTPException(status_code=404, detail="无 OCR 结果，请先运行 qwen_pipeline")
     catalog = _load_catalog()
-    inv = count_books(results, catalog, threshold)
-    RESULT_FILE.parent.mkdir(parents=True, exist_ok=True)
-    RESULT_FILE.write_text(json.dumps(inv, ensure_ascii=False, indent=2), encoding="utf-8")
+    index = build_catalog_index(catalog)
+    inv = count_books(results, index, threshold)
+    INVENTORY_RESULT_FILE.parent.mkdir(parents=True, exist_ok=True)
+    INVENTORY_RESULT_FILE.write_text(json.dumps(inv, ensure_ascii=False, indent=2), encoding="utf-8")
     return {
         "book_counts": inv["book_counts"],
         "total_copies": sum(inv["book_counts"].values()),
         "matched": sum(1 for m in inv["match_log"] if m["matched_name"]),
         "unique_titles": len(inv["book_counts"]),
         "photos": len(results),
-        "saved_to": str(RESULT_FILE),
+        "saved_to": str(INVENTORY_RESULT_FILE),
     }
 
 

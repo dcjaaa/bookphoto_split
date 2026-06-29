@@ -1,6 +1,0 @@
-# 前端环境依赖（PyQt5 桌面端，轻量）
-# 前端同学只需安装这一份，调用后端 HTTP API 即可，无需 torch/ultralytics/openai
-# 安装: pip install -r requirements-frontend.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
-
-PyQt5
-httpx

@@ -12,27 +12,25 @@ OCR 管线：调用 SiliconFlow API (Qwen3-VL) 对原始书架照片进行书名
         # 编辑 .env 填入 SILICONFLOW_API_KEY
 
 用法:
-    python -m scripts.api_ocr.ocr_pipeline                          # 批量识别全部
-    python -m scripts.api_ocr.ocr_pipeline --start 1 --end 10      # 指定范围
-    python -m scripts.api_ocr.ocr_pipeline --photo_id 5             # 单张识别
-    python -m scripts.api_ocr.ocr_pipeline --retry-failed           # 重试失败的
+    python -m scripts.ocr.qwen_pipeline                          # 批量识别全部
+    python -m scripts.ocr.qwen_pipeline --start 1 --end 10      # 指定范围
+    python -m scripts.ocr.qwen_pipeline --photo_id 5             # 单张识别
+    python -m scripts.ocr.qwen_pipeline --retry-failed           # 重试失败的
 """
 
 import argparse
 import base64
 import json
 import os
-import sys
 import time
 from pathlib import Path
 
 from dotenv import load_dotenv
 from openai import OpenAI
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from scripts.utils.paths import RAW_DIR, OCR_RESULTS_DIR
+from scripts.utils.paths import RAW_DIR, OCR_RESULTS_DIR, PROJECT_ROOT
 
-load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
+load_dotenv(PROJECT_ROOT / ".env")
 
 API_KEY = os.getenv("SILICONFLOW_API_KEY", "")
 BASE_URL = os.getenv("SILICONFLOW_BASE_URL", "https://api.siliconflow.cn/v1")

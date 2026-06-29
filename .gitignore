@@ -6,23 +6,17 @@ __pycache__/
 venv/
 .venv-paddle/
 
-# uv 锁文件（前端同学不用 uv，不入库）
-uv.lock
-
 # Python 版本标记（不强制版本）
 .python-version
 
 # IDE
 .idea/
 .vscode/
+.reasonix/
 *.swp
 
-# Models (too large for git, download separately)
-models/*.pt
-models/*.pth
-models/*.onnx
-yolo11s-seg.pt
-yolo26n.pt
+# 预训练权重（不入库）
+*.pt
 
 # OSAM cache
 .osam/
@@ -32,13 +26,15 @@ runs/
 
 # Datasets / images (local, not tracked)
 data/
+predictions/
 output/dataset/
+output/gui/
 
 # OCR
 *.env
 
-# 临时文件
-train.log
+# 临时文件 / 日志
+logs/
 predict_sources.txt
 *.tmp
 

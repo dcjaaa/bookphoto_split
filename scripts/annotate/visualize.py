@@ -1,27 +1,23 @@
 """
 将 Labelme 标注 JSON 渲染到原图上，生成可视化标注图。
 
-每本书脊多边形用随机颜色半透明填充 + 白色边框绘制，保存到 data/annotated/。
+每本书脊多边形用随机颜色半透明填充 + 白色边框绘制，保存到 data/vis/。
 
 用法:
-    python scripts/visualize_annotations.py
-    python scripts/visualize_annotations.py --photo_id 1
-    python scripts/visualize_annotations.py --start 1 --end 10
+    python -m scripts.annotate.visualize
+    python -m scripts.annotate.visualize --photo_id 1
+    python -m scripts.annotate.visualize --start 1 --end 10
 """
 
 import argparse
 import json
 import random
-import sys
 from pathlib import Path
 
 import cv2
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from scripts.utils.paths import RAW_DIR, ANNOTATIONS_DIR
-
-ANNOTATED_DIR = RAW_DIR.parent / "annotated"
+from scripts.utils.paths import RAW_DIR, ANNOTATIONS_DIR, VIS_DIR
 
 ALPHA = 0.35
 BORDER_THICKNESS = 2
@@ -91,8 +87,8 @@ def visualize_one(photo_id: int) -> bool:
 
     result = draw_annotations(img, shapes)
 
-    out_path = ANNOTATED_DIR / f"{photo_id}{img_path.suffix}"
-    ANNOTATED_DIR.mkdir(parents=True, exist_ok=True)
+    out_path = VIS_DIR / f"{photo_id}{img_path.suffix}"
+    VIS_DIR.mkdir(parents=True, exist_ok=True)
     cv2.imwrite(str(out_path), result)
     print(f"  {photo_id}: {len(shapes)} spines -> {out_path.name}")
     return True
@@ -122,7 +118,7 @@ def main():
         if visualize_one(photo_id):
             done += 1
 
-    print(f"\nDone: {done}/{end_idx - args.start + 1} images -> {ANNOTATED_DIR}/")
+    print(f"\nDone: {done}/{end_idx - args.start + 1} images -> {VIS_DIR}/")
 
 
 if __name__ == "__main__":

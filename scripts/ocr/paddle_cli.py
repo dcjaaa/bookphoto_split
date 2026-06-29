@@ -2,9 +2,9 @@
 PaddleOCR CLI — 运行在 .venv-paddle (Python 3.13 + PaddlePaddle 3.0.0) 下
 
 用法 (.venv-paddle/bin/python):
-    python scripts/ocr/paddle_ocr_cli.py --image data/split/1/spine_000.png
-    python scripts/ocr/paddle_ocr_cli.py --image data/split/1/spine_000.png --no-rotate
-    python scripts/ocr/paddle_ocr_cli.py --input data/split/1 --output data/paddle_ocr_results/1
+    python scripts/ocr/paddle_cli.py --image data/crops_labelme/1/spine_000.png
+    python scripts/ocr/paddle_cli.py --image data/crops_labelme/1/spine_000.png --no-rotate
+    python scripts/ocr/paddle_cli.py --input data/crops_labelme/1 --output data/paddle_ocr_results/1
 
 环境变量:
     FLAGS_use_mkldnn=0       禁用 OneDNN（必须，否则崩溃）
