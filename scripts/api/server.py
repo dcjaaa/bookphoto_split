@@ -30,7 +30,7 @@ from pydantic import BaseModel
 
 from scripts.utils.paths import (
     RAW_DIR, OCR_RESULTS_DIR, CATALOG_DIR, OUTPUT_DIR,
-    SEG_MODEL_PATH, CATALOG_FILE, INVENTORY_RESULT_FILE,
+    SEG_MODEL_PATH, CATALOG_FILE, CATALOG_CLEANED_FILE, INVENTORY_RESULT_FILE,
 )
 
 app = FastAPI(
@@ -60,9 +60,10 @@ def _get_seg_model():
 
 
 def _load_catalog() -> list[str]:
-    if not CATALOG_FILE.exists():
-        raise HTTPException(status_code=504, detail=f"馆藏目录不存在: {CATALOG_FILE}")
-    return json.loads(CATALOG_FILE.read_text(encoding="utf-8"))
+    src = CATALOG_CLEANED_FILE if CATALOG_CLEANED_FILE.exists() else CATALOG_FILE
+    if not src.exists():
+        raise HTTPException(status_code=504, detail=f"馆藏目录不存在: {src}")
+    return json.loads(src.read_text(encoding="utf-8"))
 
 
 class OcrResult(BaseModel):
@@ -78,10 +79,11 @@ class InventoryRequest(BaseModel):
 
 @app.get("/api/health")
 async def health():
+    catalog_ok = CATALOG_CLEANED_FILE.exists() or CATALOG_FILE.exists()
     return {
         "status": "ok",
         "model_exists": SEG_MODEL_PATH.exists(),
-        "catalog_exists": CATALOG_FILE.exists(),
+        "catalog_exists": catalog_ok,
         "ocr_results": len(list(OCR_RESULTS_DIR.glob("*.json"))) if OCR_RESULTS_DIR.exists() else 0,
     }
 
@@ -178,7 +180,7 @@ async def inventory(req: InventoryRequest):
     catalog = _load_catalog()
     index = build_catalog_index(catalog)
     results = [r.model_dump() for r in req.results]
-    inv = count_books(results, index, req.threshold)
+    inv = count_books(results, index, req.threshold, catalog=catalog)
     return {
         "book_counts": inv["book_counts"],
         "match_log": inv["match_log"],
@@ -198,7 +200,7 @@ async def inventory_all(threshold: float = 0.6):
         raise HTTPException(status_code=404, detail="无 OCR 结果，请先运行 qwen_pipeline")
     catalog = _load_catalog()
     index = build_catalog_index(catalog)
-    inv = count_books(results, index, threshold)
+    inv = count_books(results, index, threshold, catalog=catalog)
     INVENTORY_RESULT_FILE.parent.mkdir(parents=True, exist_ok=True)
     INVENTORY_RESULT_FILE.write_text(json.dumps(inv, ensure_ascii=False, indent=2), encoding="utf-8")
     return {

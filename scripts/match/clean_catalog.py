@@ -15,6 +15,7 @@
 
 import html
 import json
+import sys
 from pathlib import Path
 
 from scripts.utils.paths import CATALOG_FILE, CATALOG_CLEANED_FILE

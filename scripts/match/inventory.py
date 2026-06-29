@@ -45,8 +45,16 @@ PREFIX_SUFFIX_TOLERANCE = 8
 _SEPARATORS = "（(:："
 # 破折号分隔符 (单 — 和双 —— 都处理)
 _DASHES = re.compile(r"—{1,2}|–{1,2}")
-# 末尾版本/册次模式
+# 末尾版本/册次模式 (括号内)
 _TAIL_VERSION = re.compile(r"[（(].*?[版册卷辑].*?[)）]\s*$")
+# 末尾裸版本号 (无括号): "第X版" "第X册" "第X卷" "第X辑" "上册" "下册" "上卷" "下卷" "修订X版"
+_TAIL_BARE_VERSION = re.compile(r"\s+(第.{1,3}[版册卷辑分]|上册|下册|上卷|下卷|修订.{0,3}版|增订.{0,3}版)\s*$")
+# 前缀年份/版次: "2008" "2017" "2013" 等 4 位数字开头
+_PREFIX_YEAR = re.compile(r"^\d{4}\s*")
+# 前缀丛书名/修饰词 (在书名开头常见但非主标题的部分)
+_PREFIX_SERIES = re.compile(
+    r"^(冲击波英语英语?|（全新题型）|(?:新编|全新|插图本|新题型))\s*"
+)
 # 纯数字/年份
 _PURE_DIGIT = re.compile(r"^[\d\s\-./]+$")
 # 常见非主标题片段 (版本/册次/编者等)
@@ -110,27 +118,33 @@ def build_catalog_index(catalog: list[str]) -> dict:
 
 
 def filter_candidates(ocr_name: str, index: dict) -> list[str]:
-    """按首字符 + 长度区间过滤候选。"""
+    """按首字符 + 长度区间过滤候选。首字符不匹配时放宽到第 2 字符。"""
     if not ocr_name:
         return []
-    key = ocr_name[0].lower()
-    candidates = index.get(key, [])
     ocr_len = len(ocr_name)
     lo = max(ocr_len - 5, 1)
     hi = ocr_len + 5
-    return [t for t, l in candidates if lo <= l <= hi]
+    key = ocr_name[0].lower()
+    candidates = [t for t, l in index.get(key, []) if lo <= l <= hi]
+    if not candidates and len(ocr_name) >= 2:
+        key2 = ocr_name[1].lower()
+        candidates = [t for t, l in index.get(key2, []) if lo <= l <= hi]
+    return candidates
 
 
 def filter_candidates_for_main(main: str, index: dict) -> list[str]:
-    """为主标题过滤候选：放宽长度区间（主标题比 OCR 全名短）。"""
+    """为主标题过滤候选：放宽长度区间（主标题比 OCR 全名短）。首字符容错同上。"""
     if not main:
         return []
-    key = main[0].lower()
-    candidates = index.get(key, [])
     main_len = len(main)
     lo = max(main_len - 2, 1)
     hi = main_len + PREFIX_SUFFIX_TOLERANCE
-    return [t for t, l in candidates if lo <= l <= hi]
+    key = main[0].lower()
+    candidates = [t for t, l in index.get(key, []) if lo <= l <= hi]
+    if not candidates and len(main) >= 2:
+        key2 = main[1].lower()
+        candidates = [t for t, l in index.get(key2, []) if lo <= l <= hi]
+    return candidates
 
 
 def extract_main_titles(ocr_name: str) -> list[str]:
@@ -148,8 +162,17 @@ def extract_main_titles(ocr_name: str) -> list[str]:
         return []
 
     mains = []
-    # 1. 去末尾版本/册次
+    # 0. 去前缀年份/丛书名 + 去末尾版本号
+    stripped = _PREFIX_YEAR.sub("", ocr_name).strip()
+    stripped = _PREFIX_SERIES.sub("", stripped).strip()
+    stripped = _TAIL_VERSION.sub("", stripped).strip()
+    stripped = _TAIL_BARE_VERSION.sub("", stripped).strip()
+    if stripped != ocr_name and _is_valid_main(stripped):
+        mains.append(stripped)
+
+    # 1. 去末尾版本/册次 (对原名也做，保留原逻辑)
     cleaned = _TAIL_VERSION.sub("", ocr_name).strip()
+    cleaned = _TAIL_BARE_VERSION.sub("", cleaned).strip()
     if cleaned != ocr_name and _is_valid_main(cleaned):
         mains.append(cleaned)
 
@@ -196,11 +219,11 @@ def extract_main_titles(ocr_name: str) -> list[str]:
     return result
 
 
-def fuzzy_match(ocr_name: str, index: dict, threshold: float = 0.7) -> tuple[str | None, float, str, bool]:
+def fuzzy_match(ocr_name: str, index: dict, threshold: float = 0.7, catalog: list[str] | None = None) -> tuple[str | None, float, str, bool]:
     """模糊匹配 OCR 书名到馆藏目录。
 
     返回 (匹配名, 分数, 策略, 是否需人工确认)。
-    多策略优先级: 精确 > 主标题精确 > 前缀 > 包含 > partial > ratio。
+    多策略优先级: 精确 > 主标题精确 > 前缀 > 包含 > partial > token_set > ratio > 全库兜底。
     """
     if not ocr_name or ocr_name.startswith("未识别") or len(ocr_name) < MIN_NAME_LEN:
         return None, 0.0, "skip", False
@@ -224,20 +247,31 @@ def fuzzy_match(ocr_name: str, index: dict, threshold: float = 0.7) -> tuple[str
             if main_lower == title.strip().lower():
                 return title, 0.98, "exact_main", False
 
-    # 策略3: 主标题前缀匹配 (馆藏以主标题开头，后缀≤8字)
-    # 主标题需≥3字，避免短片段误匹配
+    # 策略3: 主标题前缀匹配 (馆藏以主标题开头，后缀≤容忍度)
+    # 主标题越短，容忍度越严格，避免 "Excel" 匹配到 "Excel之美" 等误匹配
     best_prefix = None
     best_prefix_suffix_len = 999
     best_prefix_multi = False
     for main in main_titles:
         main_lower = main.lower()
+        main_len = len(main_lower)
+        # 纯英文短词(如 Excel/SPSS)不参与 prefix_main，太容易跨书误匹配
+        if _ASCII_ONLY.match(main) and main_len < 8:
+            continue
+        # 短主标题严格限制后缀: <4字→后缀≤2, <6字→后缀≤4, 否则≤8
+        if main_len < 4:
+            suffix_limit = 2
+        elif main_len < 6:
+            suffix_limit = 4
+        else:
+            suffix_limit = PREFIX_SUFFIX_TOLERANCE
         main_candidates = filter_candidates_for_main(main, index)
         prefix_hits = []
         for title in main_candidates:
             title_lower = title.strip().lower()
             if title_lower.startswith(main_lower) and len(title_lower) >= len(main_lower):
                 suffix_len = len(title_lower) - len(main_lower)
-                if suffix_len <= PREFIX_SUFFIX_TOLERANCE:
+                if suffix_len <= suffix_limit:
                     prefix_hits.append((title, suffix_len))
         if prefix_hits:
             prefix_hits.sort(key=lambda x: x[1])
@@ -272,6 +306,26 @@ def fuzzy_match(ocr_name: str, index: dict, threshold: float = 0.7) -> tuple[str
         if best_contained:
             return best_contained, 0.88, "contained", False
 
+    # 策略4b: 主标题包含于馆藏 (主标题是馆藏子串，主标题≥4字)
+    # 救 "涉外文书写作大全" → 馆藏 "新编涉外文书写作大全" 这种馆藏有前缀的情况
+    for main in main_titles:
+        main_lower = main.lower()
+        if len(main_lower) < 4:
+            continue
+        main_candidates = filter_candidates_for_main(main, index)
+        best_contained_in = None
+        best_contained_in_suffix = 999
+        for title in main_candidates:
+            title_lower = title.strip().lower()
+            if len(title_lower) > len(main_lower) and main_lower in title_lower:
+                suffix_len = len(title_lower) - len(main_lower)
+                if suffix_len < best_contained_in_suffix:
+                    best_contained_in = title
+                    best_contained_in_suffix = suffix_len
+        if best_contained_in:
+            needs_review = best_contained_in_suffix >= 5
+            return best_contained_in, 0.85, "contained_in", needs_review
+
     # 策略5: OCR 全名 partial_ratio
     best_score = 0.0
     best_match = None
@@ -284,7 +338,17 @@ def fuzzy_match(ocr_name: str, index: dict, threshold: float = 0.7) -> tuple[str
     if best_match and best_score >= threshold:
         return best_match, best_score, "partial_full", False
 
-    # 策略6: 主标题 partial_ratio
+    # 策略6: token_set_ratio (对空格/词序不敏感)
+    for title in candidates:
+        title_lower = title.strip().lower()
+        score = fuzz.token_set_ratio(ocr_lower, title_lower) / 100.0
+        if score > best_score:
+            best_score = score
+            best_match = title
+    if best_match and best_score >= threshold:
+        return best_match, best_score, "token_set", False
+
+    # 策略7: 主标题 partial_ratio
     for main in main_titles:
         main_lower = main.lower()
         main_candidates = filter_candidates_for_main(main, index)
@@ -297,7 +361,7 @@ def fuzzy_match(ocr_name: str, index: dict, threshold: float = 0.7) -> tuple[str
     if best_match and best_score >= threshold:
         return best_match, best_score, "partial_main", False
 
-    # 策略7: OCR 全名 fuzz.ratio (兜底)
+    # 策略8: OCR 全名 fuzz.ratio (兜底)
     for title in candidates:
         title_lower = title.strip().lower()
         score = fuzz.ratio(ocr_lower, title_lower) / 100.0
@@ -307,10 +371,33 @@ def fuzzy_match(ocr_name: str, index: dict, threshold: float = 0.7) -> tuple[str
     if best_match and best_score >= threshold:
         return best_match, best_score, "ratio", False
 
+    # 策略9: 全库 fuzz.ratio 兜底 (不限首字符，救 OCR 首字错的情况)
+    if catalog is not None and best_score < threshold:
+        for title in catalog:
+            title_lower = title.strip().lower()
+            score = fuzz.ratio(ocr_lower, title_lower) / 100.0
+            if score > best_score:
+                best_score = score
+                best_match = title
+            # 也对主标题做全库 ratio
+        for main in main_titles:
+            main_lower = main.lower()
+            if len(main_lower) < 4:
+                continue
+            for title in catalog:
+                title_lower = title.strip().lower()
+                score = fuzz.ratio(main_lower, title_lower) / 100.0
+                if score > best_score:
+                    best_score = score
+                    best_match = title
+        if best_match and best_score >= 0.70:
+            needs_review = best_score < 0.85
+            return best_match, best_score, "global_ratio", needs_review
+
     return None, best_score, "none", False
 
 
-def count_books(results: list[dict], index: dict, threshold: float = 0.7) -> dict:
+def count_books(results: list[dict], index: dict, threshold: float = 0.7, catalog: list[str] | None = None) -> dict:
     """统计每本书的数量，进行馆藏匹配和去重。"""
     book_counts: dict[str, int] = {}
     match_log: list[dict] = []
@@ -319,7 +406,7 @@ def count_books(results: list[dict], index: dict, threshold: float = 0.7) -> dic
         for book in photo_result.get("books", []):
             ocr_name = book.get("book_name", "")
             count = book.get("count", 1)
-            matched, score, strategy, needs_review = fuzzy_match(ocr_name, index, threshold)
+            matched, score, strategy, needs_review = fuzzy_match(ocr_name, index, threshold, catalog=catalog)
 
             entry = {
                 "photo_id": photo_result.get("photo_id"),
@@ -356,7 +443,7 @@ def main():
 
     import time
     t0 = time.time()
-    inventory = count_books(results, index, args.threshold)
+    inventory = count_books(results, index, args.threshold, catalog=catalog)
     elapsed = time.time() - t0
 
     total_books = sum(inventory["book_counts"].values())
