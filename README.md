@@ -8,9 +8,9 @@
 
 | 模块 | 状态 | 数据量 | 说明 |
 |------|------|--------|------|
-| 书脊分割标注 (SAM3) | ✅ 完成 | 297 张 | 全自动标注，labelme 多边形格式 |
-| YOLO 分割模型 | ✅ 完成 | 6902 标注 | YOLO26s, val Mask mAP50-95=0.933, holdout=0.921 |
-| 批量预测固化 | ✅ 完成 | 7199 书脊 | 297 张全量推理，4 种产物 |
+| 书脊分割标注 (SAM3) | ✅ 完成 | 517 张 | SAM3 自动标注 + labelme 人工修正 |
+| YOLO 分割模型 | ✅ 完成 | 12678 标注 | YOLO26s, val Mask mAP50-95=0.991, holdout=0.927 |
+| 批量预测固化 | ✅ 完成 | 13195 书脊 | 517 张全量推理，4 种产物 |
 | OCR 书名识别 | ✅ 完成 | 3342 书名 | Qwen3-VL-32B，297/297 张 |
 | 馆藏匹配 + 去重计数 | ✅ 完成 | 95.4% 匹配率 | rapidfuzz + 主标题提取，0.8s |
 | FastAPI 后端 | ✅ 完成 | 8 个接口 | 分割/OCR/匹配/目录 |
@@ -68,7 +68,7 @@ bookphoto_split/
 │   ├── dataset/                      #   YOLO 训练数据集（不入库）
 │   └── inventory_result.json         #   盘点匹配结果 ⭐
 ├── runs/                             # YOLO 训练产物（不入库）
-│   └── segment/output/runs/book_spine_seg-26s-960/weights/best.pt
+│   └── segment/output/runs/book_spine_seg-26s-960-v2-2/weights/best.pt
 ├── .env.example                      # API 配置模板
 ├── pyproject.toml                    # uv 项目配置 + 依赖（唯一依赖源）
 ├── uv.lock                           # 依赖锁定（uv 管理）
@@ -85,9 +85,11 @@ bookphoto_split/
 | yolo11l | 960 | — | — | 7.0G | 4.5ms | 10 epochs 中止 |
 | yolo26l | 960 | 0.943 | 0.843 | 6.1G | 5.0ms | 已归档 |
 | yolo26m | 960 | 0.602 | 0.530 | — | — | 10 epochs 测试中 |
-| **yolo26s** | **960** | **0.948** | **0.933(val) / 0.921(holdout)** | 6.9G | 3.5ms | **当前最佳** |
+| **yolo26s v2** | **960** | **0.950** | **0.927(holdout)** | 5.7G | 3.5ms | **当前最佳** |
+| yolo26s v1 | 960 | 0.943 | 0.921(holdout) | 6.9G | 3.5ms | 297标注，已归档 |
+| yolo26l | 960 | 0.943 | 0.843(val) | 6.1G | 5.0ms | 已归档 |
 
-> 最佳模型：`runs/segment/output/runs/book_spine_seg-26s-960/weights/best.pt`（路径只在 `scripts/utils/paths.py` 的 `SEG_MODEL_PATH` 一处定义）
+> 最佳模型：`runs/segment/output/runs/book_spine_seg-26s-960-v2-2/weights/best.pt`（路径只在 `scripts/utils/paths.py` 的 `SEG_MODEL_PATH` 一处定义）
 
 ---
 
@@ -99,7 +101,7 @@ bookphoto_split/
 
 ```bash
 mkdir -p data/raw data/catalog \
-         runs/segment/output/runs/book_spine_seg-26s-960/weights \
+         runs/segment/output/runs/book_spine_seg-26s-960-v2-2/weights \
          logs
 ```
 
@@ -345,7 +347,7 @@ uv sync
 wget https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo26s-seg.pt
 
 # 训练好的 best.pt 需另行获取，放入:
-# runs/segment/output/runs/book_spine_seg-26s-960/weights/best.pt
+# runs/segment/output/runs/book_spine_seg-26s-960-v2-2/weights/best.pt
 # (路径只在 scripts/utils/paths.py 的 SEG_MODEL_PATH 一处定义)
 ```
 
@@ -480,17 +482,19 @@ python -m scripts.gui.app
 | Box  | 0.994 | 0.948    | 0.983     | 0.983  |
 | Mask | 0.994 | 0.933    | 0.985     | 0.985  |
 
-数据集：297 张书架照片，6,902 个标注多边形，7,199 张训练图像（原图+掩码crop 双路），训练 100 epochs，显存峰值 6.89 GB。
-最终模型：`runs/segment/output/runs/book_spine_seg-26s-960/weights/best.pt`（路径只在 `scripts/utils/paths.py` 的 `SEG_MODEL_PATH` 一处定义）
+数据集：517 张书架照片，12,678 个标注多边形，13,195 张训练图像（原图+掩码crop 双路），训练 100 epochs，显存峰值 5.68 GB。
+最终模型：`runs/segment/output/runs/book_spine_seg-26s-960-v2-2/weights/best.pt`（路径只在 `scripts/utils/paths.py` 的 `SEG_MODEL_PATH` 一处定义）
 
 ### holdout 评估（30 张独立测试原图）
 
 | 指标 | mAP50 | mAP50-95 | Precision | Recall |
 |------|-------|----------|-----------|--------|
-| Box  | 0.993 | 0.943    | 0.976     | 0.975  |
-| Mask | 0.993 | 0.921    | 0.975     | 0.978  |
+| Box  | 0.993 | 0.950    | 0.977     | 0.985  |
+| Mask | 0.993 | 0.927    | 0.976     | 0.988  |
 
 holdout 测试集为 30 张从未参与训练/验证的原图(744 个实例)，反映真实部署效果。
+
+训练报告详见 `docs/training_notes.md`。
 
 ### 馆藏匹配效果
 

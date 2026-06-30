@@ -40,7 +40,7 @@ PRED_CROPS_DIR = PREDICTIONS_DIR / "crops"      # 裁剪书脊 (原 split/)
 
 # === runs/ 模型权重 ===
 RUNS_DIR = PROJECT_ROOT / "runs"
-SEG_MODEL_PATH = RUNS_DIR / "segment" / "output" / "runs" / "book_spine_seg-26s-960" / "weights" / "best.pt"
+SEG_MODEL_PATH = RUNS_DIR / "segment" / "output" / "runs" / "book_spine_seg-26s-960-v2-2" / "weights" / "best.pt"
 
 # === logs/ ===
 LOGS_DIR = PROJECT_ROOT / "logs"

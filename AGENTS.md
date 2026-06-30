@@ -41,7 +41,7 @@ scripts/
 ## 关键陷阱
 
 - **训练与推理 `imgsz` 必须一致用 960**，不可混用。尺寸失配会掉点：960训→640推 掉 ~0.035（0.844→0.809），640训→1280推 崩到 ~0.29（特征尺度失配）。API 默认已是 960（`scripts/api/server.py`），不要调低。
-- **模型路径**在 `scripts/utils/paths.py` 的 `SEG_MODEL_PATH`，指向 `runs/segment/output/runs/book_spine_seg-26s-960/weights/best.pt`。换部署 run 只改这一处。权重缺失 → API 返回 503。
+- **模型路径**在 `scripts/utils/paths.py` 的 `SEG_MODEL_PATH`，指向 `runs/segment/output/runs/book_spine_seg-26s-960-v2-2/weights/best.pt`。换部署 run 只改这一处。权重缺失 → API 返回 503。
 - **OCR 依赖 `.env`**：`cp .env.example .env` 并填 `SILICONFLOW_API_KEY`。`scripts/ocr/qwen_pipeline.py` 从项目根加载 `.env`。OCR 走网络，单张约 30–180s。
 - PaddleOCR 跑在**独立 `.venv-paddle`**（Python 3.13），因 `paddlepaddle` 与主环境冲突。主环境通过 subprocess 调用：`.venv-paddle/bin/python scripts/ocr/paddle_cli.py`。不要在主 venv 里 import paddle。
 - 馆藏匹配的两条路径读的目录不同：API `/api/inventory*` 读 `titles.json`（未清洗），CLI `scripts.match.inventory` 优先读 `titles_cleaned.json`（回退 `titles.json`）。可能给出不同匹配结果。

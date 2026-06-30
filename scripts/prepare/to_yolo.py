@@ -52,13 +52,14 @@ def crop_spine_and_make_label(img, points, spine_idx, basename, out_img_dir, out
         f.write(yolo_line + "\n")
 
 
-def build_dataset(image_dir=None, json_dir=None, output_dir=None, split_ratio=0.8, seed=42, no_crop=False, holdout=0):
+def build_dataset(image_dir=None, json_dir=None, output_dir=None, split_ratio=0.8, seed=42, no_crop=False, holdout=0, holdout_ids=None):
     image_dir = Path(image_dir) if image_dir else RAW_DIR
     json_dir = Path(json_dir) if json_dir else ANNOTATIONS_DIR
     output_dir = Path(output_dir) if output_dir else DATASET_DIR
 
+    has_holdout = holdout > 0 or (holdout_ids is not None and len(holdout_ids) > 0)
     sub_dirs = ["images/train", "images/val", "labels/train", "labels/val"]
-    if holdout > 0:
+    if has_holdout:
         sub_dirs += ["images/test", "labels/test"]
     for sub in sub_dirs:
         (output_dir / sub).mkdir(parents=True, exist_ok=True)
@@ -68,13 +69,18 @@ def build_dataset(image_dir=None, json_dir=None, output_dir=None, split_ratio=0.
         print("No JSON annotation files found")
         return
 
-    random.seed(seed)
-    random.shuffle(json_files)
-
+    # holdout_ids 精确指定 test 集;否则用随机选取
     test_files = []
-    if holdout > 0:
-        test_files = json_files[:holdout]
-        json_files = json_files[holdout:]
+    if holdout_ids is not None and len(holdout_ids) > 0:
+        holdout_set = set(holdout_ids)
+        test_files = [f for f in json_files if int(f.stem) in holdout_set]
+        json_files = [f for f in json_files if int(f.stem) not in holdout_set]
+    else:
+        random.seed(seed)
+        random.shuffle(json_files)
+        if holdout > 0:
+            test_files = json_files[:holdout]
+            json_files = json_files[holdout:]
 
     split_idx = int(len(json_files) * split_ratio)
     splits = {"train": json_files[:split_idx], "val": json_files[split_idx:]}
@@ -136,7 +142,7 @@ def build_dataset(image_dir=None, json_dir=None, output_dir=None, split_ratio=0.
         encoding="utf-8",
     )
 
-    if holdout > 0:
+    if has_holdout:
         test_yaml_path = output_dir / "test.yaml"
         test_yaml_path.write_text(
             f"# YOLO holdout test config (independent of train/val)\n"
@@ -151,7 +157,7 @@ def build_dataset(image_dir=None, json_dir=None, output_dir=None, split_ratio=0.
     print(f"Original images: {stats['original']}")
     print(f"Cropped spines:  {stats['crops']}")
     print(f"Total images:    {stats['original'] + stats['crops']}")
-    if holdout > 0:
+    if has_holdout:
         print(f"Holdout test:    {stats['test_original']} originals (excluded from train/val)")
     print(f"Train/Val split: {int(split_ratio * 100)}/{int((1 - split_ratio) * 100)}")
     print(f"Output:          {output_dir}")
@@ -164,6 +170,10 @@ if __name__ == "__main__":
     parser.add_argument("--output_dir", default=None, help="Output dir (default: output/dataset)")
     parser.add_argument("--split", type=float, default=0.8, help="Train ratio")
     parser.add_argument("--holdout", type=int, default=0, help="Number of original images to hold out as independent test set (excluded from train/val)")
+    parser.add_argument("--holdout-ids", type=str, default=None, help="Comma-separated image IDs to fix as holdout test set (e.g. '2,6,20,25')")
     parser.add_argument("--no-crop", action="store_true", help="Skip crop augmentation, use full images only")
     args = parser.parse_args()
-    build_dataset(args.image_dir, args.json_dir, args.output_dir, args.split, no_crop=args.no_crop, holdout=args.holdout)
+    holdout_ids = None
+    if args.holdout_ids:
+        holdout_ids = [int(x.strip()) for x in args.holdout_ids.split(",") if x.strip()]
+    build_dataset(args.image_dir, args.json_dir, args.output_dir, args.split, no_crop=args.no_crop, holdout=args.holdout, holdout_ids=holdout_ids)
