@@ -65,6 +65,20 @@ def _load_catalog() -> list[str]:
     return json.loads(CATALOG_FILE.read_text(encoding="utf-8"))
 
 
+_catalog_cache: list[str] | None = None
+_index_cache: dict | None = None
+
+
+def _get_catalog_index() -> tuple[list[str], dict]:
+    """缓存 catalog + index，避免每次请求重建。"""
+    global _catalog_cache, _index_cache
+    if _catalog_cache is None:
+        _catalog_cache = _load_catalog()
+        from scripts.match.inventory import build_catalog_index
+        _index_cache = build_catalog_index(_catalog_cache)
+    return _catalog_cache, _index_cache
+
+
 class OcrResult(BaseModel):
     photo_id: int | None = None
     image: str | None = None
@@ -126,18 +140,29 @@ async def segment(file: UploadFile = File(...), conf: float = 0.25, imgsz: int =
         tmp_path.unlink(missing_ok=True)
 
 
-@app.post("/api/ocr")
-async def ocr(file: UploadFile = File(...)):
-    """上传书架照片 → Qwen3-VL 识别书名+数量。"""
-    from scripts.ocr.qwen_pipeline import call_ocr_api
+@app.post("/api/ocr/spine")
+async def ocr_spine(file: UploadFile = File(...)):
+    """上传单张书脊图片 → 8B OCR + 馆藏匹配 → 返回结果。"""
+    from scripts.ocr.qwen_pipeline import call_ocr_api_spine
+    from scripts.match.inventory import fuzzy_match
 
     suffix = Path(file.filename or "img.jpg").suffix or ".jpg"
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
         tmp.write(await file.read())
         tmp_path = Path(tmp.name)
     try:
-        books = call_ocr_api(tmp_path)
-        return {"books": books, "count": len(books)}
+        book_name = call_ocr_api_spine(tmp_path)
+        catalog, index = _get_catalog_index()
+        matched, score, strategy, needs_review = fuzzy_match(
+            book_name, index, 0.7, catalog=catalog
+        )
+        return {
+            "book_name": book_name,
+            "matched_name": matched,
+            "score": round(score, 4),
+            "strategy": strategy,
+            "needs_review": needs_review,
+        }
     except HTTPException:
         raise
     except Exception as e:

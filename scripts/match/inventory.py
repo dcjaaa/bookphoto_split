@@ -481,5 +481,84 @@ def main():
     print(f"\nSaved to {INVENTORY_RESULT_FILE}")
 
 
+def evaluate_vs_ground_truth(
+    spine_results: list[dict],
+    ground_truth: dict,
+) -> dict:
+    """
+    简单对比：单脊OCR匹配名 vs 评判标准。
+
+    Args:
+        spine_results: 单脊OCR结果列表，每项含 {book_name, matched_name, spine_idx}
+        ground_truth: data/ground_truth/{n}.json 的内容，含 books 列表
+
+    Returns:
+        {
+            "per_spine": [{spine_idx, ocr_name, matched_name, gt_name, result}],
+            "summary": {correct, missed, extra, total_gt, total_spine, accuracy}
+        }
+    """
+    gt_books = ground_truth.get("books", [])
+
+    # 把 GT 按 matched_name 展开为逐册列表（count=2 → 2条）
+    gt_pool: list[str | None] = []
+    for b in gt_books:
+        name = b.get("matched_name")
+        count = b.get("count", 1)
+        for _ in range(count):
+            gt_pool.append(name)
+
+    # 对每个 spine 结果，在 gt_pool 里找 matched_name 相同的
+    per_spine = []
+    correct = 0
+    extra = 0
+
+    for sr in spine_results:
+        matched = sr.get("matched_name")
+        spine_idx = sr.get("spine_idx", 0)
+        ocr_name = sr.get("book_name", "")
+
+        result = "extra"
+        gt_name = None
+
+        if matched and matched in gt_pool:
+            gt_pool.remove(matched)
+            result = "correct"
+            gt_name = matched
+            correct += 1
+        elif matched:
+            # matched_name 不在 GT 里 → 多检
+            extra += 1
+        else:
+            # 未匹配 → 多检（OCR 识别了但馆藏没有）
+            extra += 1
+
+        per_spine.append({
+            "spine_idx": spine_idx,
+            "ocr_name": ocr_name,
+            "matched_name": matched,
+            "gt_name": gt_name,
+            "result": result,
+        })
+
+    # GT 没被消费的 → 漏检
+    missed = len(gt_pool)
+    total_gt = sum(b.get("count", 1) for b in gt_books)
+    total_spine = len(spine_results)
+    accuracy = correct / (correct + missed + extra) if (correct + missed + extra) > 0 else 0.0
+
+    return {
+        "per_spine": per_spine,
+        "summary": {
+            "correct": correct,
+            "missed": missed,
+            "extra": extra,
+            "total_gt": total_gt,
+            "total_spine": total_spine,
+            "accuracy": round(accuracy, 4),
+        },
+    }
+
+
 if __name__ == "__main__":
     main()

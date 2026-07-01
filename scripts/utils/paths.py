@@ -17,6 +17,7 @@ ANNOTATIONS_DIR = DATA_DIR / "annotations"  # SAM/labelme 标注 JSON
 VIS_DIR = DATA_DIR / "vis"                  # 标注可视化图 (原 annotated/)
 CROPS_LABELED_DIR = DATA_DIR / "crops_labelme"  # 按标注裁剪书脊 (原 split/)
 OCR_RESULTS_DIR = DATA_DIR / "ocr_results"  # Qwen3-VL OCR 结果
+GROUND_TRUTH_DIR = DATA_DIR / "ground_truth"  # 测评基准(匹配后的OCR结果,供人工审查)
 CATALOG_DIR = DATA_DIR / "catalog"          # 馆藏目录
 PADDLE_OCR_RESULTS_DIR = DATA_DIR / "paddle_ocr_results"
 CROPS_PREDICT_DIR = DATA_DIR / "crops_yolo"  # 从 YOLO 预测裁剪 (原 split_yolo/)

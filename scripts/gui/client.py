@@ -73,17 +73,17 @@ def segment(
         raise ClientError(f"segment failed: {e}") from e
 
 
-def ocr(
+def ocr_spine(
     image_path: Path,
     base_url: str = DEFAULT_BASE,
-    timeout: float = 200.0,
+    timeout: float = 120.0,
 ) -> dict[str, Any]:
-    """POST /api/ocr — Qwen3-VL book name recognition. Returns {books, count}."""
+    """POST /api/ocr/spine — 单脊 OCR + 馆藏匹配。返回 {book_name, matched_name, score, strategy, needs_review}。"""
     try:
         with open(image_path, "rb") as fh:
             r = httpx.post(
-                _url(base_url, "/api/ocr"),
-                files={"file": (image_path.name, fh, "image/jpeg")},
+                _url(base_url, "/api/ocr/spine"),
+                files={"file": (image_path.name, fh, "image/png")},
                 timeout=timeout,
             )
         r.raise_for_status()
@@ -94,9 +94,9 @@ def ocr(
             detail = e.response.json().get("detail", "")
         except Exception:
             pass
-        raise ClientError(f"OCR failed ({e.response.status_code}): {detail}") from e
+        raise ClientError(f"OCR spine failed ({e.response.status_code}): {detail}") from e
     except Exception as e:
-        raise ClientError(f"OCR failed: {e}") from e
+        raise ClientError(f"OCR spine failed: {e}") from e
 
 
 def inventory(

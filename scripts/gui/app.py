@@ -17,6 +17,7 @@ from __future__ import annotations
 import csv
 import json
 import sys
+import tempfile
 from datetime import datetime
 from pathlib import Path
 
@@ -65,12 +66,13 @@ from PyQt5.QtGui import QKeySequence
 from scripts.gui.backend import BackendManager
 from scripts.gui.client import (
     segment as api_segment,
-    ocr as api_ocr,
+    ocr_spine as api_ocr_spine,
     inventory as api_inventory,
     health as api_health,
     ClientError,
 )
-from scripts.utils.paths import GUI_OUTPUT_DIR, RAW_DIR
+from scripts.utils.paths import GUI_OUTPUT_DIR, RAW_DIR, GROUND_TRUTH_DIR
+from scripts.match.inventory import evaluate_vs_ground_truth
 
 # ---------------------------------------------------------------------------
 # colour palette
@@ -688,7 +690,7 @@ class MainWindow(QMainWindow):
         self._btn_ocr.setEnabled(False)
         btn_row.addWidget(self._btn_ocr)
 
-        self._btn_match = QPushButton("📚 馆藏匹配")
+        self._btn_match = QPushButton("📊 评估对比")
         self._btn_match.setMinimumHeight(36)
         self._btn_match.setEnabled(False)
         btn_row.addWidget(self._btn_match)
@@ -787,16 +789,17 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(6)
 
-        hint = QLabel("双击单元格编辑书名和数量，编辑完成后点击「馆藏匹配」")
-        hint.setWordWrap(True)
-        hint.setStyleSheet("color:#888;")
-        layout.addWidget(hint)
+        self._lbl_ocr_summary = QLabel("尚未 OCR 识别")
+        self._lbl_ocr_summary.setWordWrap(True)
+        layout.addWidget(self._lbl_ocr_summary)
 
-        self._ocr_table = QTableWidget(0, 2)
-        self._ocr_table.setHorizontalHeaderLabels(["书名", "数量"])
-        self._ocr_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
-        self._ocr_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Fixed)
-        self._ocr_table.setColumnWidth(1, 60)
+        self._ocr_table = QTableWidget(0, 6)
+        self._ocr_table.setHorizontalHeaderLabels(["序号", "置信度", "OCR 书名", "馆藏匹配", "评判标准", "结果"])
+        self._ocr_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        self._ocr_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
+        self._ocr_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.Stretch)
+        self._ocr_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self._ocr_table.setSelectionBehavior(QTableWidget.SelectRows)
         layout.addWidget(self._ocr_table)
 
     def _build_match_tab(self) -> None:
@@ -826,7 +829,7 @@ class MainWindow(QMainWindow):
         self._conf_slider.valueChanged.connect(self._on_conf_changed)
         self._btn_segment.clicked.connect(self._on_segment)
         self._btn_ocr.clicked.connect(self._on_ocr)
-        self._btn_match.clicked.connect(self._on_match)
+        self._btn_match.clicked.connect(self._on_evaluate)
         self._btn_export.clicked.connect(self._on_export)
         self._btn_save.clicked.connect(self._on_save)
         self._btn_prev.clicked.connect(self._on_prev_image)
@@ -1055,6 +1058,8 @@ class MainWindow(QMainWindow):
         # generate crop thumbnails
         self._build_crop_gallery(boxes)
 
+        self._ocr_table.setRowCount(0)
+        self._lbl_ocr_summary.setText("尚未 OCR 识别")
         self._btn_ocr.setEnabled(count > 0)
         self._btn_save.setEnabled(count > 0)
         self._tabs.setCurrentIndex(0)
@@ -1258,32 +1263,120 @@ class MainWindow(QMainWindow):
     # ==================================================================
 
     def _on_ocr(self) -> None:
-        if self._current_image is None:
+        if not self._all_detections:
+            QMessageBox.information(self, "提示", "请先执行分割检测")
             return
-        self._set_busy(True, "正在 OCR 识别书名（可能需要 30-180 秒）…")
-        self._run_worker(api_ocr, self._current_image)
+        self._set_busy(True, "正在 OCR 识别书脊…")
+        self._ocr_spine_results: list[dict] = []
+        self._ocr_spine_idx = 0
+        self._ocr_spine_total = len(self._all_detections)
+        self._ocr_next_spine()
+
+    def _ocr_next_spine(self) -> None:
+        if self._ocr_spine_idx >= self._ocr_spine_total:
+            self._on_ocr_all_done()
+            return
+        idx = self._ocr_spine_idx
+        self._status_bar.showMessage(f"OCR 中 {idx + 1}/{self._ocr_spine_total}…")
+        QApplication.processEvents()
+
+        pix = self._get_full_crop(idx)
+        if pix is None or pix.isNull():
+            self._ocr_spine_results.append({
+                "spine_idx": idx,
+                "book_name": "未识别",
+                "matched_name": None,
+                "score": 0.0,
+                "strategy": "skip",
+                "needs_review": False,
+            })
+            self._ocr_spine_idx += 1
+            self._ocr_next_spine()
+            return
+
+        tmp_path = Path(tempfile.mktemp(suffix=".png"))
+        pix.save(str(tmp_path), "PNG")
+        self._run_worker(api_ocr_spine, tmp_path)
 
     def _on_ocr_done(self, result: dict) -> None:
+        idx = self._ocr_spine_idx
+        tmp_to_clean = self._worker._args[0] if self._worker else None
+
+        result["spine_idx"] = idx
+        self._ocr_spine_results.append(result)
+        self._ocr_spine_idx += 1
+
+        if tmp_to_clean and Path(tmp_to_clean).exists():
+            Path(tmp_to_clean).unlink(missing_ok=True)
+
+        self._ocr_next_spine()
+
+    def _on_ocr_all_done(self) -> None:
         self._set_busy(False)
-        books = result.get("books", [])
-        self._ocr_books = books
-        cnt = len(books)
+        results = self._ocr_spine_results
 
-        self._ocr_table.setRowCount(cnt)
-        for i, b in enumerate(books):
-            name_item = QTableWidgetItem(b.get("book_name", ""))
-            name_item.setFlags(name_item.flags() | Qt.ItemIsEditable)
-            self._ocr_table.setItem(i, 0, name_item)
+        self._ocr_table.setRowCount(len(results))
+        for i, r in enumerate(results):
+            conf = self._all_detections[i].get("confidence", 0.0) if i < len(self._all_detections) else 0
+            items = [
+                QTableWidgetItem(str(i + 1)),
+                QTableWidgetItem(f"{conf:.4f}"),
+                QTableWidgetItem(r.get("book_name", "")),
+                QTableWidgetItem(r.get("matched_name") or "—"),
+                QTableWidgetItem(""),
+                QTableWidgetItem(""),
+            ]
+            items[0].setTextAlignment(Qt.AlignCenter)
+            items[1].setTextAlignment(Qt.AlignCenter)
+            for col, it in enumerate(items):
+                self._ocr_table.setItem(i, col, it)
 
-            cnt_item = QTableWidgetItem(str(b.get("count", 1)))
-            cnt_item.setFlags(cnt_item.flags() | Qt.ItemIsEditable)
-            cnt_item.setTextAlignment(Qt.AlignCenter)
-            self._ocr_table.setItem(i, 1, cnt_item)
-
-        self._btn_match.setEnabled(cnt > 0)
+        self._btn_match.setEnabled(len(results) > 0)
         self._has_unsaved = True
         self._tabs.setCurrentIndex(2)
-        self._status_bar.showMessage(f"OCR 完成: {cnt} 本书名 — 可双击编辑后点击「馆藏匹配」")
+        self._status_bar.showMessage(f"OCR 完成: {len(results)} 个书脊 — 点击「📊 评估对比」查看准确率")
+
+    def _on_evaluate(self) -> None:
+        if not hasattr(self, "_ocr_spine_results") or not self._ocr_spine_results:
+            QMessageBox.information(self, "提示", "请先执行 OCR 识别")
+            return
+
+        photo_id = self._current_image.stem if self._current_image else ""
+        gt_path = GROUND_TRUTH_DIR / f"{photo_id}.json"
+        if not gt_path.exists():
+            QMessageBox.information(self, "提示", f"评判标准文件不存在: {gt_path.name}\n请先运行 create_ground_truth")
+            return
+
+        gt_data = json.loads(gt_path.read_text(encoding="utf-8"))
+        eval_result = evaluate_vs_ground_truth(self._ocr_spine_results, gt_data)
+
+        summary = eval_result["summary"]
+        self._lbl_ocr_summary.setText(
+            f"准确率 <b>{summary['accuracy']*100:.1f}%</b> "
+            f"({summary['correct']}/{summary['total_gt']} 正确) | "
+            f"漏检 <b>{summary['missed']}</b> | "
+            f"多检 <b>{summary['extra']}</b>"
+        )
+
+        for i, ps in enumerate(eval_result["per_spine"]):
+            gt_item = QTableWidgetItem(ps.get("gt_name") or "—")
+            result_text = ps.get("result", "")
+            if result_text == "correct":
+                result_text = "✓"
+                gt_item.setForeground(COLOR_HIGH_CONF)
+            elif result_text == "missed":
+                result_text = "✗ 漏检"
+                gt_item.setForeground(COLOR_LOW_CONF)
+            else:
+                result_text = "✗ 多检"
+                gt_item.setForeground(COLOR_LOW_CONF)
+            result_item = QTableWidgetItem(result_text)
+            result_item.setTextAlignment(Qt.AlignCenter)
+            self._ocr_table.setItem(i, 4, gt_item)
+            self._ocr_table.setItem(i, 5, result_item)
+
+        self._tabs.setCurrentIndex(2)
+        self._status_bar.showMessage(f"评估完成: 准确率 {summary['accuracy']*100:.1f}%")
 
     # ==================================================================
     # slot: match
@@ -1502,21 +1595,17 @@ class MainWindow(QMainWindow):
         return result
 
     def _collect_ocr_data(self) -> list[dict]:
-        """Collect current OCR table data (post user edits)."""
+        """Collect current OCR table data."""
         books: list[dict] = []
         for row in range(self._ocr_table.rowCount()):
-            name_item = self._ocr_table.item(row, 0)
-            cnt_item = self._ocr_table.item(row, 1)
-            if name_item is None:
+            ocr_item = self._ocr_table.item(row, 2)
+            matched_item = self._ocr_table.item(row, 3)
+            if ocr_item is None:
                 continue
-            name = name_item.text().strip()
-            if not name:
-                continue
-            try:
-                cnt = int(cnt_item.text()) if cnt_item else 1
-            except ValueError:
-                cnt = 1
-            books.append({"book_name": name, "count": cnt})
+            books.append({
+                "book_name": ocr_item.text().strip(),
+                "matched_name": matched_item.text().strip() if matched_item else "",
+            })
         return books
 
     def _collect_match_data(self) -> dict | None:
@@ -1603,6 +1692,7 @@ class MainWindow(QMainWindow):
         self._detect_table.setRowCount(0)
         self._lbl_detect_summary.setText("尚未检测")
         self._ocr_table.setRowCount(0)
+        self._lbl_ocr_summary.setText("尚未 OCR 识别")
         self._match_table.setRowCount(0)
         self._lbl_match_summary.setText("尚未匹配")
         self._btn_segment.setEnabled(True)
@@ -1673,15 +1763,13 @@ class MainWindow(QMainWindow):
         self._worker.start()
 
     def _on_worker_result(self, result):
-        """Dispatch to the correct handler based on what call finished last."""
-        # Determine which handler to call by inspecting what we have queued
         w = self._worker
         if w is None:
             return
         fn = w._fn  # noqa: private access, intentional
         if fn is api_segment:
             self._on_segment_done(result)
-        elif fn is api_ocr:
+        elif fn is api_ocr_spine:
             self._on_ocr_done(result)
         elif fn is api_inventory:
             self._on_match_done(result)
