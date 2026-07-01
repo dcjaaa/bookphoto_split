@@ -35,11 +35,13 @@ from PyQt5.QtGui import (
 )
 from PyQt5.QtWidgets import (
     QApplication,
+    QDialog,
     QFileDialog,
     QGroupBox,
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QLineEdit,
     QListWidget,
     QListWidgetItem,
     QMainWindow,
@@ -57,6 +59,9 @@ from PyQt5.QtWidgets import (
     QGridLayout,
 )
 
+from PyQt5.QtWidgets import QShortcut
+from PyQt5.QtGui import QKeySequence
+
 from scripts.gui.backend import BackendManager
 from scripts.gui.client import (
     segment as api_segment,
@@ -65,7 +70,7 @@ from scripts.gui.client import (
     health as api_health,
     ClientError,
 )
-from scripts.utils.paths import GUI_OUTPUT_DIR
+from scripts.utils.paths import GUI_OUTPUT_DIR, RAW_DIR
 
 # ---------------------------------------------------------------------------
 # colour palette
@@ -75,6 +80,261 @@ COLOR_HIGH_CONF = QColor(0x27, 0xAE, 0x60, 220)     # green  — >= 0.8
 COLOR_MED_CONF  = QColor(0xF3, 0x9C, 0x12, 220)     # orange — 0.5–0.8
 COLOR_LOW_CONF  = QColor(0xE7, 0x4C, 0x3C, 220)     # red    — < 0.5
 COLOR_NEEDS_REVIEW = QColor(0xFF, 0xF3, 0xCD)       # light yellow bg
+
+# ---------------------------------------------------------------------------
+# QSS theme — colorful light theme
+# ---------------------------------------------------------------------------
+
+QSS = """
+/* ── globals ───────────────────────────────────────────── */
+QMainWindow, QWidget#central {
+    background-color: #F5F6FA;
+    color: #2C3E50;
+    font-family: "Microsoft YaHei", "Segoe UI", "PingFang SC", sans-serif;
+    font-size: 13px;
+}
+
+/* ── toolbar ──────────────────────────────────────────── */
+QWidget#toolbar {
+    background-color: #FFFFFF;
+    border-bottom: 1px solid #E0E4E8;
+    min-height: 48px;
+    padding: 0 12px;
+}
+
+QWidget#actionbar {
+    background-color: #FFFFFF;
+    border-top: 1px solid #E0E4E8;
+    min-height: 52px;
+    padding: 0 12px;
+}
+
+/* ── buttons ──────────────────────────────────────────── */
+QPushButton {
+    border: none;
+    border-radius: 6px;
+    padding: 8px 18px;
+    font-weight: 600;
+    color: #FFFFFF;
+    min-height: 32px;
+}
+QPushButton:hover {
+    opacity: 0.9;
+}
+QPushButton:pressed {
+    margin-top: 1px;
+}
+QPushButton:disabled {
+    background-color: #E0E4E8 !important;
+    color: #BDC3C7 !important;
+}
+QPushButton#open-btn {
+    background-color: #00BFA5;
+}
+QPushButton#open-btn:hover {
+    background-color: #00A68C;
+}
+QPushButton#nav-btn {
+    background-color: #95A5A6;
+    padding: 6px 14px;
+}
+QPushButton#nav-btn:hover {
+    background-color: #7F8C8D;
+}
+QPushButton#nav-btn:disabled {
+    background-color: #E0E4E8;
+}
+QPushButton#segment-btn {
+    background-color: #4A90D9;
+}
+QPushButton#segment-btn:hover {
+    background-color: #357ABD;
+}
+QPushButton#ocr-btn {
+    background-color: #7C4DFF;
+}
+QPushButton#ocr-btn:hover {
+    background-color: #6535E0;
+}
+QPushButton#match-btn {
+    background-color: #4CAF50;
+}
+QPushButton#match-btn:hover {
+    background-color: #388E3C;
+}
+QPushButton#save-btn {
+    background-color: #FF9800;
+}
+QPushButton#save-btn:hover {
+    background-color: #E68900;
+}
+QPushButton#export-btn {
+    background-color: #607D8B;
+}
+QPushButton#export-btn:hover {
+    background-color: #546E7A;
+}
+
+/* ── tabs ─────────────────────────────────────────────── */
+QTabWidget::pane {
+    background-color: #FFFFFF;
+    border: 1px solid #E0E4E8;
+    border-top: none;
+    border-radius: 0 0 6px 6px;
+}
+QTabBar::tab {
+    background-color: #F0F2F5;
+    color: #7F8C8D;
+    padding: 10px 20px;
+    border: 1px solid #E0E4E8;
+    border-bottom: none;
+    border-radius: 6px 6px 0 0;
+    margin-right: 2px;
+    font-weight: 600;
+}
+QTabBar::tab:selected {
+    background-color: #FFFFFF;
+    color: #4A90D9;
+    border-bottom: 2px solid #4A90D9;
+}
+QTabBar::tab:hover:!selected {
+    background-color: #E8EAEE;
+    color: #2C3E50;
+}
+
+/* ── tables ───────────────────────────────────────────── */
+QTableWidget {
+    background-color: #FFFFFF;
+    alternate-background-color: #F8F9FB;
+    border: 1px solid #E0E4E8;
+    border-radius: 6px;
+    gridline-color: #EEF0F4;
+    selection-background-color: #E3F0FF;
+    selection-color: #2C3E50;
+}
+QTableWidget::item {
+    padding: 6px 8px;
+}
+QHeaderView::section {
+    background-color: #F0F2F5;
+    color: #7F8C8D;
+    font-weight: 600;
+    padding: 8px 8px;
+    border: none;
+    border-bottom: 2px solid #E0E4E8;
+    text-transform: uppercase;
+    font-size: 11px;
+}
+
+/* ── group box ────────────────────────────────────────── */
+QGroupBox {
+    background-color: #FFFFFF;
+    border: 1px solid #E0E4E8;
+    border-radius: 8px;
+    margin-top: 16px;
+    padding: 16px 12px 12px;
+    font-weight: 600;
+    color: #2C3E50;
+}
+QGroupBox::title {
+    subcontrol-origin: margin;
+    subcontrol-position: top left;
+    padding: 4px 10px;
+    margin-left: 8px;
+    background-color: #FFFFFF;
+    border: 1px solid #E0E4E8;
+    border-radius: 4px;
+}
+
+/* ── slider ───────────────────────────────────────────── */
+QSlider::groove:horizontal {
+    height: 6px;
+    background: #E0E4E8;
+    border-radius: 3px;
+}
+QSlider::handle:horizontal {
+    background: #4A90D9;
+    border: 2px solid #FFFFFF;
+    width: 18px;
+    height: 18px;
+    margin: -7px 0;
+    border-radius: 10px;
+}
+QSlider::sub-page:horizontal {
+    background: #90CAF9;
+    border-radius: 3px;
+}
+
+/* ── list widget ──────────────────────────────────────── */
+QListWidget {
+    background-color: #FFFFFF;
+    border: 1px solid #E0E4E8;
+    border-radius: 6px;
+    outline: none;
+}
+QListWidget::item {
+    padding: 8px 10px;
+    border-bottom: 1px solid #F0F2F5;
+}
+QListWidget::item:selected {
+    background-color: #E3F0FF;
+    color: #2C3E50;
+}
+
+/* ── scroll area ──────────────────────────────────────── */
+QScrollArea {
+    border: 1px solid #E0E4E8;
+    border-radius: 6px;
+    background-color: #F5F6FA;
+}
+
+/* ── status bar ───────────────────────────────────────── */
+QStatusBar {
+    background-color: #FFFFFF;
+    border-top: 1px solid #E0E4E8;
+    color: #7F8C8D;
+    font-size: 12px;
+    padding: 4px;
+}
+QStatusBar::item {
+    border: none;
+}
+
+/* ── label ────────────────────────────────────────────── */
+QLabel {
+    color: #2C3E50;
+}
+
+/* ── slider label ─────────────────────────────────────── */
+QLabel#conf-label {
+    color: #4A90D9;
+    font-weight: 700;
+    font-size: 14px;
+}
+
+/* ── splitter ─────────────────────────────────────────── */
+QSplitter::handle {
+    background-color: #E0E4E8;
+    width: 2px;
+    margin: 4px 0;
+}
+
+/* ── preview frame ────────────────────────────────────── */
+QWidget#preview-frame {
+    background-color: #F0F2F5;
+    border: 1px solid #E0E4E8;
+    border-radius: 8px;
+}
+
+/* ── backend LED ──────────────────────────────────────── */
+QLed {
+    min-width: 12px;
+    min-height: 12px;
+    max-width: 12px;
+    max-height: 12px;
+    border-radius: 6px;
+}
+"""
 
 # ---------------------------------------------------------------------------
 # worker threads (keep UI responsive during API calls)
@@ -113,10 +373,13 @@ class ImagePreviewWidget(QWidget):
         self._pixmap: QPixmap | None = None
         self._boxes: list[dict] = []
         self._scale = 1.0
+        self._cached_scaled: QPixmap | None = None
+        self._cached_w: int = 0
+        self._cached_h: int = 0
         self.setMinimumSize(400, 300)
         self.setAutoFillBackground(True)
         pal = self.palette()
-        pal.setColor(QPalette.Window, QColor(0x2D, 0x2D, 0x2D))
+        pal.setColor(QPalette.Window, QColor(0xF0, 0xF2, 0xF5))
         self.setPalette(pal)
 
     # ------------------------------------------------------------------
@@ -133,6 +396,7 @@ class ImagePreviewWidget(QWidget):
             return
         self._pixmap = pix
         self._boxes.clear()
+        self._cached_scaled = None
         self._fit_scale()
         self.update()
 
@@ -157,23 +421,53 @@ class ImagePreviewWidget(QWidget):
         except Exception:
             pass  # PyQt5: any exception in paintEvent → qFatal
 
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if self._pixmap is not None:
+            old_scale = self._scale
+            self._fit_scale()
+            if abs(self._scale - old_scale) > 0.01:
+                self._cached_scaled = None
+                self.update()
+
+    def _ensure_cache(self):
+        if self._pixmap is None or self._pixmap.isNull():
+            return None, 0, 0
+        pw = self._pixmap.width()
+        ph = self._pixmap.height()
+        w = self.width()
+        h = self.height()
+        if self._cached_scaled is not None and self._cached_w == w and self._cached_h == h:
+            return self._cached_scaled, self._ox, self._oy
+        pw2 = int(pw * self._scale)
+        ph2 = int(ph * self._scale)
+        if pw2 <= 0 or ph2 <= 0:
+            return None, 0, 0
+        scaled = self._pixmap.scaled(pw2, ph2, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        self._cached_scaled = scaled
+        self._cached_w = w
+        self._cached_h = h
+        self._ox = (w - scaled.width()) // 2
+        self._oy = (h - scaled.height()) // 2
+        return scaled, self._ox, self._oy
+
     def _safe_paint(self) -> None:
         if self._pixmap is None or self._pixmap.isNull():
+            p = QPainter(self)
+            p.setPen(QColor("#BDC3C7"))
+            p.setFont(QFont("Sans", 16))
+            p.drawText(self.rect(), Qt.AlignCenter, "拖拽或点击📂选择图片")
+            p.end()
             return
         if self._scale <= 0:
             return
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
 
-        # draw image scaled+centered
-        pw = int(self._pixmap.width() * self._scale)
-        ph = int(self._pixmap.height() * self._scale)
-        if pw <= 0 or ph <= 0:
+        scaled, ox, oy = self._ensure_cache()
+        if scaled is None:
             p.end()
             return
-        scaled = self._pixmap.scaled(pw, ph, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-        ox = (self.width() - scaled.width()) // 2
-        oy = (self.height() - scaled.height()) // 2
         p.drawPixmap(ox, oy, scaled)
 
         if not self._boxes:
@@ -227,6 +521,9 @@ class ImagePreviewWidget(QWidget):
         p.end()
 
     def wheelEvent(self, event):
+        if event.modifiers() != Qt.ControlModifier:
+            event.ignore()
+            return
         delta = event.angleDelta().y() / 120.0
         self._scale = max(0.1, min(5.0, self._scale + delta * 0.15))
         self.update()
@@ -256,15 +553,21 @@ class MainWindow(QMainWindow):
         super().__init__()
         self._backend = backend
         self._current_image: Path | None = None
+        self._image_list: list[Path] = []
+        self._image_index: int = -1
         self._all_detections: list[dict] = []
         self._ocr_books: list[dict] = []
         self._worker: _ApiWorker | None = None
-        self._crop_pixmaps_full: list[QPixmap | None] = []  # full-size crop cache
+        self._crop_pixmaps_full: list[QPixmap | None] = []  # full-size crop cache (lazy)
+        self._has_unsaved: bool = False
 
         self.setWindowTitle("BookPhoto Split — 图书盘点")
         self.resize(1400, 850)
+        self.setAcceptDrops(True)
         self._build_ui()
+        self._apply_stylesheet()
         self._connect_signals()
+        self._setup_shortcuts()
 
         # auto-start backend
         self._on_start_backend()
@@ -274,46 +577,69 @@ class MainWindow(QMainWindow):
     # ==================================================================
 
     def _build_ui(self) -> None:
-        central = QWidget()
-        self.setCentralWidget(central)
-        root = QVBoxLayout(central)
-        root.setContentsMargins(8, 8, 8, 8)
-        root.setSpacing(6)
+        self._central = QWidget()
+        self._central.setObjectName("central")
+        self.setCentralWidget(self._central)
+        root = QVBoxLayout(self._central)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
 
-        # --- toolbar row ---
-        toolbar = QHBoxLayout()
+        # --- toolbar ---
+        self._toolbar_widget = QWidget()
+        toolbar = QHBoxLayout(self._toolbar_widget)
+        toolbar.setContentsMargins(16, 8, 16, 8)
+        toolbar.setSpacing(8)
+
         self._btn_open = QPushButton("📂 选择图片")
-        self._btn_open.setMinimumWidth(100)
-
         toolbar.addWidget(self._btn_open)
-        toolbar.addSpacing(12)
 
-        toolbar.addWidget(QLabel("置信度阈值:"))
+        self._btn_prev = QPushButton("◀")
+        self._btn_prev.setFixedWidth(36)
+        self._btn_prev.setToolTip("上一张 (←)")
+        self._btn_prev.setEnabled(False)
+        toolbar.addWidget(self._btn_prev)
+
+        self._btn_next = QPushButton("▶")
+        self._btn_next.setFixedWidth(36)
+        self._btn_next.setToolTip("下一张 (→)")
+        self._btn_next.setEnabled(False)
+        toolbar.addWidget(self._btn_next)
+
+        self._current_image_label = QLabel("未选择图片")
+        self._current_image_label.setStyleSheet(
+            "color:#2C3E50;font-weight:bold;font-size:13px;padding:2px 8px;"
+            "background:#E8F8F5;border-radius:3px;"
+        )
+        toolbar.addWidget(self._current_image_label)
+        toolbar.addSpacing(8)
+
+        toolbar.addSpacing(16)
+        toolbar.addWidget(QLabel("置信度:"))
         self._conf_slider = QSlider(Qt.Horizontal)
         self._conf_slider.setRange(10, 100)
         self._conf_slider.setValue(25)
-        self._conf_slider.setFixedWidth(150)
+        self._conf_slider.setFixedWidth(160)
         toolbar.addWidget(self._conf_slider)
 
         self._conf_label = QLabel("0.25")
-        self._conf_label.setFixedWidth(35)
+        self._conf_label.setFixedWidth(36)
         toolbar.addWidget(self._conf_label)
-        toolbar.addSpacing(24)
+        toolbar.addSpacing(16)
 
         self._backend_led = QLabel()
-        self._backend_led.setFixedSize(14, 14)
-        self._backend_led.setStyleSheet(
-            "border-radius:7px;background-color:#888;"
-        )
+        self._backend_led.setFixedSize(12, 12)
+        self._backend_led.setStyleSheet("border-radius:6px;background-color:#95A5A6;")
         toolbar.addWidget(self._backend_led)
         self._backend_status = QLabel("后端未连接")
+        self._backend_status.setStyleSheet("color:#7F8C8D;font-size:12px;")
         toolbar.addWidget(self._backend_status)
         toolbar.addStretch()
 
-        root.addLayout(toolbar)
+        root.addWidget(self._toolbar_widget)
 
         # --- body: splitter (image | tabs) ---
         splitter = QSplitter(Qt.Horizontal)
+        splitter.setHandleWidth(2)
 
         # -- left: image --
         self._preview = ImagePreviewWidget()
@@ -345,10 +671,14 @@ class MainWindow(QMainWindow):
         splitter.addWidget(self._tabs)
         splitter.setStretchFactor(0, 6)
         splitter.setStretchFactor(1, 4)
-        root.addWidget(splitter)
+        root.addWidget(splitter, 1)
 
-        # --- bottom button bar ---
-        btn_row = QHBoxLayout()
+        # --- action bar ---
+        self._actionbar_widget = QWidget()
+        btn_row = QHBoxLayout(self._actionbar_widget)
+        btn_row.setContentsMargins(16, 8, 16, 8)
+        btn_row.setSpacing(10)
+
         self._btn_segment = QPushButton("🔍 分割检测")
         self._btn_segment.setMinimumHeight(36)
         btn_row.addWidget(self._btn_segment)
@@ -374,12 +704,12 @@ class MainWindow(QMainWindow):
         btn_row.addWidget(self._btn_export)
 
         btn_row.addStretch()
-        root.addLayout(btn_row)
+        root.addWidget(self._actionbar_widget)
 
         # --- status bar ---
         self._status_bar = QStatusBar()
         self.setStatusBar(self._status_bar)
-        self._status_bar.showMessage("就绪 — 点击「选择图片」开始")
+        self._status_bar.showMessage("就绪 — 点击📂选择图片开始")
 
     # ------------------------------------------------------------------
     # tab builders
@@ -499,9 +829,30 @@ class MainWindow(QMainWindow):
         self._btn_match.clicked.connect(self._on_match)
         self._btn_export.clicked.connect(self._on_export)
         self._btn_save.clicked.connect(self._on_save)
+        self._btn_prev.clicked.connect(self._on_prev_image)
+        self._btn_next.clicked.connect(self._on_next_image)
         self._crop_list.currentRowChanged.connect(self._on_crop_selected)
         self._btn_save_crop_current.clicked.connect(self._on_save_crop_current)
         self._btn_save_crop_all.clicked.connect(self._on_save_crop_all)
+
+    # ==================================================================
+    # QSS stylesheet
+    # ==================================================================
+
+    def _apply_stylesheet(self) -> None:
+        self._btn_open.setObjectName("open-btn")
+        self._btn_prev.setObjectName("nav-btn")
+        self._btn_next.setObjectName("nav-btn")
+        self._btn_segment.setObjectName("segment-btn")
+        self._btn_ocr.setObjectName("ocr-btn")
+        self._btn_match.setObjectName("match-btn")
+        self._btn_save.setObjectName("save-btn")
+        self._btn_export.setObjectName("export-btn")
+        self._conf_label.setObjectName("conf-label")
+        self._toolbar_widget.setObjectName("toolbar")
+        self._actionbar_widget.setObjectName("actionbar")
+        self._preview.setObjectName("preview-frame")
+        self.setStyleSheet(QSS)
 
     # ==================================================================
     # backend lifecycle
@@ -532,40 +883,117 @@ class MainWindow(QMainWindow):
     # ==================================================================
 
     def _on_open_image(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(
-            self, "选择书架照片", "",
-            "Images (*.jpg *.jpeg *.png);;All Files (*)",
-        )
+        path = self._open_image_dialog()
         if not path:
             return
-        self._current_image = Path(path)
-        self._preview.load_image(self._current_image)
-        self._all_detections.clear()
-        self._ocr_books.clear()
+        self._navigate_to(Path(path))
 
-        # clear crop list
-        self._crop_list.clear()
-        self._crop_pixmaps_full.clear()
-        self._crop_preview_label.setPixmap(QPixmap())
-        self._crop_preview_label.setText("分割后在此显示书脊裁剪图")
-        self._btn_save_crop_current.setEnabled(False)
-        self._btn_save_crop_all.setEnabled(False)
+    def _open_image_dialog(self) -> str | None:
+        """Custom image picker dialog with live preview."""
+        dlg = QDialog(self)
+        dlg.setWindowTitle("选择书架照片")
+        dlg.resize(860, 520)
+        dlg.setMinimumSize(700, 400)
 
-        # reset tabs
-        self._detect_table.setRowCount(0)
-        self._lbl_detect_summary.setText("尚未检测")
-        self._ocr_table.setRowCount(0)
-        self._match_table.setRowCount(0)
-        self._lbl_match_summary.setText("尚未匹配")
+        # file list
+        file_list = QListWidget()
+        file_list.setFixedWidth(320)
+        file_list.setStyleSheet("QListWidget{font-size:11pt;}")
+
+        # preview
+        preview = QLabel("← 点击左侧文件名预览")
+        preview.setAlignment(Qt.AlignCenter)
+        preview.setMinimumWidth(400)
+        preview.setStyleSheet(
+            "QLabel{background:#E8ECF0; border:1px solid #BDC3C7; color:#7F8C8D; font-size:12pt; padding:10px;}"
+        )
+
+        # directory selector
+        dir_edit = QLineEdit(str(RAW_DIR.resolve()))
+        dir_edit.setPlaceholderText("图片文件夹路径…")
+        dir_edit.setReadOnly(True)
+        btn_browse = QPushButton("浏览…")
+        btn_browse.setFixedWidth(70)
+
+        dir_bar = QHBoxLayout()
+        dir_bar.addWidget(QLabel("文件夹:"))
+        dir_bar.addWidget(dir_edit, 1)
+        dir_bar.addWidget(btn_browse)
 
         # buttons
-        self._btn_segment.setEnabled(True)
-        self._btn_ocr.setEnabled(False)
-        self._btn_match.setEnabled(False)
-        self._btn_save.setEnabled(False)
-        self._btn_export.setEnabled(False)
+        btn_ok = QPushButton("确定")
+        btn_ok.setFixedWidth(90)
+        btn_cancel = QPushButton("取消")
+        btn_cancel.setFixedWidth(90)
+        btn_bar = QHBoxLayout()
+        btn_bar.addStretch()
+        btn_bar.addWidget(btn_ok)
+        btn_bar.addWidget(btn_cancel)
 
-        self._status_bar.showMessage(f"已选择: {self._current_image.name}")
+        # file list + preview
+        splitter = QSplitter(Qt.Horizontal)
+        splitter.addWidget(file_list)
+        splitter.addWidget(preview)
+        splitter.setStretchFactor(0, 1)
+        splitter.setStretchFactor(1, 3)
+
+        layout = QVBoxLayout(dlg)
+        layout.addLayout(dir_bar)
+        layout.addWidget(splitter, 1)
+        layout.addLayout(btn_bar)
+
+        # --- load files ---
+        def _load_dir(dir_path: Path) -> None:
+            file_list.clear()
+            preview.setText("← 点击左侧文件名预览")
+            exts = {".jpg", ".jpeg", ".png"}
+            files = sorted(
+                [f for f in dir_path.iterdir() if f.suffix.lower() in exts],
+                key=lambda f: int(f.stem) if f.stem.isdigit() else f.name,
+            )
+            for f in files:
+                item = QListWidgetItem(f.name)
+                item.setData(Qt.UserRole, str(f))
+                item.setToolTip(str(f))
+                file_list.addItem(item)
+
+        _load_dir(RAW_DIR)
+
+        def _on_selected(row: int) -> None:
+            if row < 0:
+                return
+            item = file_list.item(row)
+            path_str = item.data(Qt.UserRole)
+            pix = QPixmap(path_str)
+            if pix.isNull():
+                return
+            avail_w = preview.width() - 20
+            avail_h = preview.height() - 20
+            if avail_w <= 0:
+                avail_w = 380
+            if avail_h <= 0:
+                avail_h = 400
+            pix = pix.scaled(avail_w, avail_h, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            preview.setPixmap(pix)
+
+        file_list.currentRowChanged.connect(_on_selected)
+
+        def _on_browse() -> None:
+            path = QFileDialog.getExistingDirectory(dlg, "选择图片文件夹", str(RAW_DIR))
+            if path:
+                dir_edit.setText(path)
+                _load_dir(Path(path))
+
+        btn_browse.clicked.connect(_on_browse)
+        btn_ok.clicked.connect(lambda: dlg.accept())
+        btn_cancel.clicked.connect(lambda: dlg.reject())
+        file_list.itemDoubleClicked.connect(lambda: dlg.accept())
+
+        if dlg.exec_() == QDialog.Accepted:
+            row = file_list.currentRow()
+            if row >= 0:
+                return file_list.item(row).data(Qt.UserRole)
+        return None
 
     # ==================================================================
     # slot: confidence slider
@@ -598,6 +1026,7 @@ class MainWindow(QMainWindow):
         boxes = result.get("boxes", [])
         count = result.get("count", len(boxes))
         self._all_detections = boxes
+        self._has_unsaved = True
         self._ocr_books.clear()
 
         # apply current conf filter
@@ -660,7 +1089,7 @@ class MainWindow(QMainWindow):
             self._detect_table.setItem(i, 2, QTableWidgetItem(f"{w:.0f} × {h:.0f}"))
 
     def _build_crop_gallery(self, detections: list[dict]) -> None:
-        """Generate full-size crops for all detections and populate crop list."""
+        """Generate crop thumbnails for the list (full crops are lazy)."""
         self._crop_list.clear()
         self._crop_pixmaps_full.clear()
 
@@ -670,15 +1099,10 @@ class MainWindow(QMainWindow):
         src_pix = self._preview._pixmap
 
         for idx, det in enumerate(detections):
-            # full-size crop (for preview + save)
-            full_pix = self._crop_spine_pixmap(src_pix, det, 1000)
-            self._crop_pixmaps_full.append(full_pix)
-
-            # small thumbnail for list icon
+            # small thumbnail for list icon only (full crop is lazy)
             thumb_pix = self._crop_spine_pixmap(src_pix, det, 40)
             conf = det["confidence"]
 
-            # list item with icon + text
             item = QListWidgetItem()
             if thumb_pix is not None:
                 item.setIcon(QIcon(thumb_pix))
@@ -707,51 +1131,52 @@ class MainWindow(QMainWindow):
                     return
 
     def _on_crop_selected(self, row: int) -> None:
-        """Show selected crop in large preview."""
-        if row < 0 or row >= len(self._crop_pixmaps_full):
+        """Show selected crop in large preview (lazy-generated)."""
+        if row < 0 or row >= len(self._all_detections):
             self._crop_preview_label.setPixmap(QPixmap())
             self._crop_preview_label.setText("分割后在此显示书脊裁剪图")
             self._btn_save_crop_current.setEnabled(False)
             return
 
-        pix = self._crop_pixmaps_full[row]
+        pix = self._get_full_crop(row)
         if pix is None or pix.isNull():
             self._crop_preview_label.setText("无法生成裁剪图")
             self._btn_save_crop_current.setEnabled(False)
             return
 
-        # fit to preview area (keep aspect ratio)
         avail_w = max(100, self._crop_preview_scroll.viewport().width() - 20)
         avail_h = max(100, self._crop_preview_scroll.viewport().height() - 20)
         scaled = pix.scaled(avail_w, avail_h, Qt.KeepAspectRatio, Qt.SmoothTransformation)
         self._crop_preview_label.setPixmap(scaled)
         self._btn_save_crop_current.setEnabled(True)
 
-    def _on_save_crop_current(self) -> None:
-        """Save the currently selected crop as a transparent PNG."""
-        row = self._crop_list.currentRow()
-        if row < 0 or row >= len(self._crop_pixmaps_full):
-            return
-        pix = self._crop_pixmaps_full[row]
+    def _save_crop_to_file(self, row: int) -> None:
+        """Generate full-size crop on demand and save."""
+        pix = self._get_full_crop(row)
         if pix is None or pix.isNull():
             return
-
         path, _ = QFileDialog.getSaveFileName(
             self, "保存书脊裁剪图",
             f"spine_{row + 1:03d}.png",
             "PNG (*.png);;All Files (*)",
+            options=QFileDialog.DontUseNativeDialog,
         )
         if not path:
             return
         pix.save(path, "PNG")
         self._status_bar.showMessage(f"已保存: {path}")
 
+    def _on_save_crop_current(self) -> None:
+        row = self._crop_list.currentRow()
+        if row < 0:
+            return
+        self._save_crop_to_file(row)
+
     def _on_save_crop_all(self) -> None:
-        """Save all visible (conf >= threshold) crops to a directory."""
         conf_thresh = self._conf_slider.value() / 100.0
         visible_indices = [
             i for i, det in enumerate(self._all_detections)
-            if det["confidence"] >= conf_thresh and i < len(self._crop_pixmaps_full)
+            if det["confidence"] >= conf_thresh
         ]
         if not visible_indices:
             QMessageBox.information(self, "提示", "没有可保存的裁剪图")
@@ -764,13 +1189,29 @@ class MainWindow(QMainWindow):
         out_dir = Path(path)
         n = 0
         for i in visible_indices:
-            pix = self._crop_pixmaps_full[i]
+            pix = self._get_full_crop(i)
             if pix is not None and not pix.isNull():
                 pix.save(str(out_dir / f"spine_{i + 1:03d}.png"), "PNG")
                 n += 1
 
         self._status_bar.showMessage(f"已保存 {n} 张裁剪图到 {out_dir}")
         QMessageBox.information(self, "保存完成", f"已保存 {n} 张裁剪图到:\n{out_dir}")
+
+    def _get_full_crop(self, idx: int) -> QPixmap | None:
+        """Lazy generate and cache full-size crop."""
+        if idx < 0 or idx >= len(self._all_detections):
+            return None
+        if idx < len(self._crop_pixmaps_full) and self._crop_pixmaps_full[idx] is not None:
+            return self._crop_pixmaps_full[idx]
+        src = self._preview._pixmap
+        if src is None or src.isNull():
+            return None
+        det = self._all_detections[idx]
+        pix = self._crop_spine_pixmap(src, det, 1000)
+        while len(self._crop_pixmaps_full) <= idx:
+            self._crop_pixmaps_full.append(None)
+        self._crop_pixmaps_full[idx] = pix
+        return pix
 
     def _crop_spine_pixmap(self, src: QPixmap, det: dict, thumb_w: int) -> QPixmap | None:
         """Crop a single spine from source pixmap using polygon clip. Returns thumbnail."""
@@ -840,7 +1281,8 @@ class MainWindow(QMainWindow):
             self._ocr_table.setItem(i, 1, cnt_item)
 
         self._btn_match.setEnabled(cnt > 0)
-        self._tabs.setCurrentIndex(1)
+        self._has_unsaved = True
+        self._tabs.setCurrentIndex(2)
         self._status_bar.showMessage(f"OCR 完成: {cnt} 本书名 — 可双击编辑后点击「馆藏匹配」")
 
     # ==================================================================
@@ -905,7 +1347,8 @@ class MainWindow(QMainWindow):
                 self._match_table.setItem(i, col, it)
 
         self._btn_export.setEnabled(True)
-        self._tabs.setCurrentIndex(2)
+        self._has_unsaved = True
+        self._tabs.setCurrentIndex(3)
         self._status_bar.showMessage(f"匹配完成: {match_rate:.1f}%")
 
     # ==================================================================
@@ -933,20 +1376,20 @@ class MainWindow(QMainWindow):
             i for i, det in enumerate(self._all_detections)
             if det["confidence"] >= conf_thresh
         ]
-        if filtered_indices and self._crop_pixmaps_full:
+        if filtered_indices:
             crops_dir = out_dir / "crops"
             crops_dir.mkdir(parents=True, exist_ok=True)
             n_saved = 0
             for i in filtered_indices:
-                if i < len(self._crop_pixmaps_full):
-                    pix = self._crop_pixmaps_full[i]
-                    if pix is not None and not pix.isNull():
-                        pix.save(str(crops_dir / f"spine_{i + 1:03d}.png"), "PNG")
-                        n_saved += 1
+                pix = self._get_full_crop(i)
+                if pix is not None and not pix.isNull():
+                    pix.save(str(crops_dir / f"spine_{i + 1:03d}.png"), "PNG")
+                    n_saved += 1
             if n_saved > 0:
                 saved.append(f"裁剪书脊: {n_saved} 张 PNG")
 
         # 3. detection results JSON
+        filtered = [self._all_detections[i] for i in filtered_indices]
         if filtered:
             det_data = {
                 "image": str(self._current_image) if self._current_image else None,
@@ -994,6 +1437,7 @@ class MainWindow(QMainWindow):
             return
 
         self._status_bar.showMessage(f"已保存到 {out_dir} ({', '.join(saved)})")
+        self._has_unsaved = False
         QMessageBox.information(
             self, "保存完成",
             f"已保存 {len(saved)} 个文件到:\n{out_dir}\n\n{saved}",
@@ -1104,6 +1548,7 @@ class MainWindow(QMainWindow):
         path, _ = QFileDialog.getSaveFileName(
             self, "导出匹配结果", "inventory_result.csv",
             "CSV (*.csv);;All Files (*)",
+            options=QFileDialog.DontUseNativeDialog,
         )
         if not path:
             return
@@ -1120,6 +1565,94 @@ class MainWindow(QMainWindow):
             self._status_bar.showMessage(f"已导出: {path}")
         except Exception as e:
             QMessageBox.critical(self, "导出失败", str(e))
+
+    # ==================================================================
+    # image navigation
+    # ==================================================================
+
+    def _build_image_list(self) -> None:
+        if self._current_image is None:
+            return
+        parent = self._current_image.parent
+        exts = {".jpg", ".jpeg", ".png"}
+        images = sorted(
+            [p for p in parent.iterdir() if p.suffix.lower() in exts],
+            key=lambda p: int(p.stem) if p.stem.isdigit() else p.name,
+        )
+        self._image_list = images
+        try:
+            self._image_index = images.index(self._current_image)
+        except ValueError:
+            self._image_index = -1
+
+    def _update_nav_buttons(self) -> None:
+        self._btn_prev.setEnabled(self._image_index > 0)
+        self._btn_next.setEnabled(self._image_index < len(self._image_list) - 1)
+
+    def _navigate_to(self, path: Path) -> None:
+        self._current_image = path
+        self._preview.load_image(path)
+        self._all_detections.clear()
+        self._ocr_books.clear()
+        self._crop_list.clear()
+        self._crop_pixmaps_full.clear()
+        self._crop_preview_label.setPixmap(QPixmap())
+        self._crop_preview_label.setText("分割后在此显示书脊裁剪图")
+        self._btn_save_crop_current.setEnabled(False)
+        self._btn_save_crop_all.setEnabled(False)
+        self._detect_table.setRowCount(0)
+        self._lbl_detect_summary.setText("尚未检测")
+        self._ocr_table.setRowCount(0)
+        self._match_table.setRowCount(0)
+        self._lbl_match_summary.setText("尚未匹配")
+        self._btn_segment.setEnabled(True)
+        self._btn_ocr.setEnabled(False)
+        self._btn_match.setEnabled(False)
+        self._btn_save.setEnabled(False)
+        self._btn_export.setEnabled(False)
+        self._has_unsaved = False
+        self._current_image_label.setText(f"📷 {path.name}")
+        self._build_image_list()
+        self._update_nav_buttons()
+        self._status_bar.showMessage(f"已选择: {path.name}")
+
+    def _on_prev_image(self) -> None:
+        if self._image_index > 0:
+            self._navigate_to(self._image_list[self._image_index - 1])
+
+    def _on_next_image(self) -> None:
+        if self._image_index < len(self._image_list) - 1:
+            self._navigate_to(self._image_list[self._image_index + 1])
+
+    # ==================================================================
+    # drag & drop
+    # ==================================================================
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+
+    def dropEvent(self, event):
+        for url in event.mimeData().urls():
+            path = Path(url.toLocalFile())
+            if path.suffix.lower() in {".jpg", ".jpeg", ".png"}:
+                self._navigate_to(path)
+                break
+
+    # ==================================================================
+    # keyboard shortcuts
+    # ==================================================================
+
+    def _setup_shortcuts(self) -> None:
+        QShortcut(QKeySequence("Ctrl+O"), self, self._on_open_image)
+        QShortcut(QKeySequence("Ctrl+S"), self, self._on_save)
+        QShortcut(QKeySequence("Ctrl+E"), self, self._on_export)
+        QShortcut(QKeySequence("Left"), self, self._on_prev_image)
+        QShortcut(QKeySequence("Right"), self, self._on_next_image)
+        QShortcut(QKeySequence("Escape"), self, self._on_close_dialog)
+
+    def _on_close_dialog(self) -> None:
+        self.close()
 
     # ==================================================================
     # helpers
@@ -1163,11 +1696,19 @@ class MainWindow(QMainWindow):
     # ==================================================================
 
     def closeEvent(self, event):
+        if self._has_unsaved and self._all_detections:
+            reply = QMessageBox.question(
+                self, "确认关闭", "有未保存的结果，确定关闭吗？",
+                QMessageBox.Yes | QMessageBox.No,
+            )
+            if reply == QMessageBox.No:
+                event.ignore()
+                return
         if self._worker is not None and self._worker.isRunning():
             self._worker.quit()
             self._worker.wait(2000)
         self._backend.stop()
-        super().closeEvent(event)
+        event.accept()
 
 
 # ---------------------------------------------------------------------------
