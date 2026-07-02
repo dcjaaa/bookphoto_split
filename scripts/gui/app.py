@@ -1455,12 +1455,15 @@ class MainWindow(QMainWindow):
 
         summary = eval_result["summary"]
         acc = summary["accuracy"] * 100
+        count_acc = summary.get("counting_accuracy", 0) * 100
+        prec = summary.get("precision", 0) * 100
+        rec = summary.get("recall", 0) * 100
         skipped_info = f" | 跳过(阈值以下) <b>{summary.get('skipped',0)}</b>" if summary.get("skipped", 0) > 0 else ""
         self._lbl_ocr_summary.setText(
-            f"准确率 <b>{acc:.1f}%</b> "
-            f"({summary['correct']}/{summary['total_gt']} 正确) | "
-            f"漏检 <b>{summary['missed']}</b> | "
-            f"多检 <b>{summary['extra']}</b>"
+            f"识别准确率 <b>{acc:.1f}%</b> ({summary['correct']}/{summary['total_gt']}) | "
+            f"计数准确率 <b>{count_acc:.1f}%</b> | "
+            f"精确率 <b>{prec:.1f}%</b> / 召回率 <b>{rec:.1f}%</b> | "
+            f"漏检 {summary['missed']} / 多检 {summary['extra']}"
             f"{skipped_info}"
         )
 

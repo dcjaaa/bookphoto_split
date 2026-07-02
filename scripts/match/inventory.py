@@ -697,6 +697,31 @@ def evaluate_vs_ground_truth(
     total_active = total_spine - skipped
     accuracy = correct / total_gt if total_gt > 0 else 0.0
 
+    # 计数准确率: 对比每本书的 OCR count vs GT count
+    # 按 matched_name 聚合 spine 的 count（来自 book_labels 的数据）
+    spine_counts: dict[str, int] = {}
+    for ps in per_spine:
+        if ps["result"] == "correct" and ps.get("gt_matched"):
+            spine_counts[ps["gt_matched"]] = spine_counts.get(ps["gt_matched"], 0) + 1
+
+    gt_counts: dict[str, int] = {}
+    unique_titles = 0
+    for b in gt_books:
+        mt = b.get("matched_name")
+        if mt:
+            gt_counts[mt] = gt_counts.get(mt, 0) + b.get("count", 1)
+    unique_titles = len(gt_counts)
+
+    count_correct = 0
+    for title, gt_cnt in gt_counts.items():
+        if spine_counts.get(title, 0) == gt_cnt:
+            count_correct += 1
+
+    counting_accuracy = count_correct / unique_titles if unique_titles > 0 else 0.0
+    precision = correct / (correct + extra) if (correct + extra) > 0 else 0.0
+    recall = correct / (correct + missed) if (correct + missed) > 0 else 0.0
+    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
+
     return {
         "per_spine": per_spine,
         "summary": {
@@ -708,6 +733,12 @@ def evaluate_vs_ground_truth(
             "total_spine": total_spine,
             "total_active": total_active,
             "accuracy": round(accuracy, 4),
+            "counting_accuracy": round(counting_accuracy, 4),
+            "precision": round(precision, 4),
+            "recall": round(recall, 4),
+            "f1": round(f1, 4),
+            "unique_titles": unique_titles,
+            "count_correct": count_correct,
         },
     }
 
