@@ -35,7 +35,14 @@ load_dotenv(PROJECT_ROOT / ".env")
 API_KEY = os.getenv("SILICONFLOW_API_KEY", "")
 BASE_URL = os.getenv("SILICONFLOW_BASE_URL", "https://api.siliconflow.cn/v1")
 MODEL = os.getenv("SILICONFLOW_MODEL", "Qwen/Qwen3-VL-32B-Instruct")
-SPINE_MODEL = os.getenv("SILICONFLOW_MODEL_SPINE", "Qwen/Qwen3-VL-8B-Instruct")
+SPINE_MODEL = os.getenv("SILICONFLOW_MODEL_SPINE", MODEL)
+
+# API 密钥池 (逗号分隔, 用于并发避限速)
+_SPINE_KEYS_RAW = os.getenv("SILICONFLOW_SPINE_KEYS", "")
+SPINE_API_KEYS = [k.strip() for k in _SPINE_KEYS_RAW.split(",") if k.strip()] if _SPINE_KEYS_RAW else []
+if not SPINE_API_KEYS and API_KEY:
+    SPINE_API_KEYS = [API_KEY]  # 兜底: 用主 key
+_spine_key_idx = 0
 
 SYSTEM_PROMPT = """你是一个专业的图书盘点助手。你的任务是识别书架照片中所有书籍的书名，并统计每本书出现的册数。
 
@@ -145,8 +152,11 @@ def call_ocr_api(image_path: Path) -> list[dict]:
 
 
 def call_ocr_api_spine(image_path: Path) -> str:
-    """单张书脊图片 → 返回书名字符串。使用 8B 模型。"""
-    client = OpenAI(api_key=API_KEY, base_url=BASE_URL, timeout=60, max_retries=0)
+    """单张书脊图片 → 返回书名字符串。从 API 密钥池轮选。"""
+    global _spine_key_idx
+    key = SPINE_API_KEYS[_spine_key_idx % len(SPINE_API_KEYS)]
+    _spine_key_idx += 1
+    client = OpenAI(api_key=key, base_url=BASE_URL, timeout=180, max_retries=0)
 
     b64 = encode_image(image_path)
     ext = image_path.suffix.lower()

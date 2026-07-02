@@ -141,14 +141,14 @@ async def segment(file: UploadFile = File(...), conf: float = 0.25, imgsz: int =
 
 
 @app.post("/api/ocr/spine")
-async def ocr_spine(file: UploadFile = File(...)):
-    """上传单张书脊图片 → 8B OCR + 馆藏匹配 → 返回结果。"""
+def ocr_spine(file: UploadFile = File(...)):
+    """上传单张书脊图片 → 32B OCR + 馆藏匹配 → 返回结果。（同步端点，线程池并发）"""
     from scripts.ocr.qwen_pipeline import call_ocr_api_spine
     from scripts.match.inventory import fuzzy_match
 
     suffix = Path(file.filename or "img.jpg").suffix or ".jpg"
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
-        tmp.write(await file.read())
+        tmp.write(file.file.read())
         tmp_path = Path(tmp.name)
     try:
         book_name = call_ocr_api_spine(tmp_path)

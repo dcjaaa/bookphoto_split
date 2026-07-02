@@ -76,7 +76,7 @@ def segment(
 def ocr_spine(
     image_path: Path,
     base_url: str = DEFAULT_BASE,
-    timeout: float = 120.0,
+    timeout: float = 180.0,
 ) -> dict[str, Any]:
     """POST /api/ocr/spine — 单脊 OCR + 馆藏匹配。返回 {book_name, matched_name, score, strategy, needs_review}。"""
     try:

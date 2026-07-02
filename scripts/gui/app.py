@@ -71,7 +71,7 @@ from scripts.gui.client import (
     health as api_health,
     ClientError,
 )
-from scripts.utils.paths import GUI_OUTPUT_DIR, RAW_DIR, GROUND_TRUTH_DIR
+from scripts.utils.paths import GUI_OUTPUT_DIR, RAW_DIR, BOOK_LABELS_DIR
 from scripts.match.inventory import evaluate_vs_ground_truth
 
 # ---------------------------------------------------------------------------
@@ -665,10 +665,10 @@ class MainWindow(QMainWindow):
         self._build_ocr_tab()
         self._tabs.addTab(self._tab_ocr, "📖 OCR 结果")
 
-        # tab 3: match
+        # tab 3: evaluation details
         self._tab_match = QWidget()
         self._build_match_tab()
-        self._tabs.addTab(self._tab_match, "📚 匹配结果")
+        self._tabs.addTab(self._tab_match, "📊 评估详情")
 
         splitter.addWidget(self._tabs)
         splitter.setStretchFactor(0, 6)
@@ -694,6 +694,16 @@ class MainWindow(QMainWindow):
         self._btn_match.setMinimumHeight(36)
         self._btn_match.setEnabled(False)
         btn_row.addWidget(self._btn_match)
+
+        self._btn_retry_fail = QPushButton("🔄 重试失败")
+        self._btn_retry_fail.setMinimumHeight(36)
+        self._btn_retry_fail.setEnabled(False)
+        btn_row.addWidget(self._btn_retry_fail)
+
+        self._btn_retry_extra = QPushButton("🔄 重试多检")
+        self._btn_retry_extra.setMinimumHeight(36)
+        self._btn_retry_extra.setEnabled(False)
+        btn_row.addWidget(self._btn_retry_extra)
 
         self._btn_save = QPushButton("💾 保存结果")
         self._btn_save.setMinimumHeight(36)
@@ -794,7 +804,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self._lbl_ocr_summary)
 
         self._ocr_table = QTableWidget(0, 6)
-        self._ocr_table.setHorizontalHeaderLabels(["序号", "置信度", "OCR 书名", "馆藏匹配", "评判标准", "结果"])
+        self._ocr_table.setHorizontalHeaderLabels(["序号", "置信度", "OCR 书名", "馆藏匹配", "书名标注", "结果"])
         self._ocr_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
         self._ocr_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
         self._ocr_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.Stretch)
@@ -807,15 +817,18 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(6)
 
-        self._lbl_match_summary = QLabel("尚未匹配")
+        self._lbl_match_summary = QLabel("OCR 完成后点击「📊 评估对比」查看详情")
         self._lbl_match_summary.setWordWrap(True)
         layout.addWidget(self._lbl_match_summary)
 
-        self._match_table = QTableWidget(0, 5)
+        self._match_table = QTableWidget(0, 7)
         self._match_table.setHorizontalHeaderLabels([
-            "OCR 书名", "匹配馆藏", "分数", "策略", "需确认",
+            "序号", "OCR 书名", "馆藏匹配", "书名标注", "标注馆藏", "分数", "结果",
         ])
-        self._match_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self._match_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        self._match_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        self._match_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
+        self._match_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.Stretch)
         self._match_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self._match_table.setSelectionBehavior(QTableWidget.SelectRows)
         layout.addWidget(self._match_table)
@@ -830,6 +843,9 @@ class MainWindow(QMainWindow):
         self._btn_segment.clicked.connect(self._on_segment)
         self._btn_ocr.clicked.connect(self._on_ocr)
         self._btn_match.clicked.connect(self._on_evaluate)
+        self._btn_retry_fail.clicked.connect(self._on_retry_fail)
+        self._btn_retry_extra.clicked.connect(self._on_retry_extra)
+        self._ocr_table.cellDoubleClicked.connect(self._on_ocr_cell_double_click)
         self._btn_export.clicked.connect(self._on_export)
         self._btn_save.clicked.connect(self._on_save)
         self._btn_prev.clicked.connect(self._on_prev_image)
@@ -1259,65 +1275,127 @@ class MainWindow(QMainWindow):
         return crop.scaled(thumb_w, thumb_h, Qt.KeepAspectRatio, Qt.SmoothTransformation)
 
     # ==================================================================
-    # slot: OCR
+    # slot: OCR (并行推理, 5 并发)
     # ==================================================================
 
-    def _on_ocr(self) -> None:
+    _OCR_MAX_CONCURRENT = 10
+
+    def _on_ocr(self, spine_indices: list[int] | None = None) -> None:
+        if spine_indices is True or spine_indices is False:
+            spine_indices = None  # QPushButton clicked 信号传 bool
         if not self._all_detections:
             QMessageBox.information(self, "提示", "请先执行分割检测")
             return
-        self._set_busy(True, "正在 OCR 识别书脊…")
-        self._ocr_spine_results: list[dict] = []
-        self._ocr_spine_idx = 0
-        self._ocr_spine_total = len(self._all_detections)
-        self._ocr_next_spine()
 
-    def _ocr_next_spine(self) -> None:
-        if self._ocr_spine_idx >= self._ocr_spine_total:
-            self._on_ocr_all_done()
+        conf_thresh = self._conf_slider.value() / 100.0
+        all_dets = self._all_detections
+
+        if spine_indices is not None:
+            self._ocr_queue = list(spine_indices)
+            if not hasattr(self, '_ocr_spine_results') or self._ocr_spine_results is None:
+                self._ocr_spine_results = [None] * len(all_dets)
+        else:
+            self._ocr_queue = [i for i, d in enumerate(all_dets) if d["confidence"] >= conf_thresh]
+            if not self._ocr_queue:
+                QMessageBox.information(self, "提示", f"所有书脊置信度均低于 {conf_thresh:.2f}，无需 OCR")
+                return
+            self._ocr_spine_results = [None] * len(all_dets)
+            for i, d in enumerate(all_dets):
+                if d["confidence"] < conf_thresh:
+                    self._ocr_spine_results[i] = {
+                        "spine_idx": i, "book_name": f"已跳过(<{conf_thresh:.2f})",
+                        "matched_name": None, "score": 0.0, "strategy": "skip_conf",
+                        "needs_review": False,
+                    }
+
+        msg = f"重试 {len(self._ocr_queue)} 个书脊…" if spine_indices else f"OCR 识别书脊 (高于 {conf_thresh:.2f}, {self._OCR_MAX_CONCURRENT}并发)…"
+        self._set_busy(True, msg)
+
+        self._ocr_pending = len(self._ocr_queue)
+        self._ocr_completed = 0
+        self._ocr_next_qi = 0
+
+        # 启动初始 N 个并发（错峰 200ms 避免同时触发限速）
+        self._ocr_workers: list[_ApiWorker] = []  # 保持引用防 GC 崩溃
+        import time as _time
+        for i in range(min(self._OCR_MAX_CONCURRENT, self._ocr_pending)):
+            if i > 0:
+                _time.sleep(0.2)
+            self._launch_ocr_worker()
+
+    def _launch_ocr_worker(self) -> None:
+        if self._ocr_next_qi >= self._ocr_pending:
             return
-        idx = self._ocr_spine_idx
-        self._status_bar.showMessage(f"OCR 中 {idx + 1}/{self._ocr_spine_total}…")
+        qi = self._ocr_next_qi
+        self._ocr_next_qi += 1
+        idx = self._ocr_queue[qi]
+
+        # 懒生成临时文件（不阻塞启动），400px JPEG 大幅提速
+        src = self._preview._pixmap
+        pix = self._crop_spine_pixmap(src, self._all_detections[idx], 400) if src else None
+        if pix is None or pix.isNull():
+            self._ocr_spine_results[idx] = {
+                "spine_idx": idx, "book_name": "未识别",
+                "matched_name": None, "score": 0.0, "strategy": "skip",
+                "needs_review": False,
+            }
+            self._on_spine_complete()
+            return
+        tmp = Path(tempfile.mktemp(suffix=".jpg"))
+        pix.save(str(tmp), "JPEG", quality=85)
+
+        def _done(result):
+            result["spine_idx"] = idx
+            self._ocr_spine_results[idx] = result
+            if tmp.exists():
+                tmp.unlink(missing_ok=True)
+            self._on_spine_complete()
+
+        def _err(err_str):
+            self._ocr_spine_results[idx] = {
+                "spine_idx": idx, "book_name": f"错误: {err_str[:30]}",
+                "matched_name": None, "score": 0.0, "strategy": "error",
+                "needs_review": False,
+            }
+            if tmp.exists():
+                tmp.unlink(missing_ok=True)
+            self._on_spine_complete()
+
+        w = _ApiWorker(api_ocr_spine, tmp)
+        w.finished.connect(_done)
+        w.error.connect(_err)
+        self._ocr_workers.append(w)
+        w.start()
+
+    def _on_spine_complete(self) -> None:
+        self._ocr_completed += 1
+        self._status_bar.showMessage(f"OCR 中 {self._ocr_completed}/{self._ocr_pending}…")
         QApplication.processEvents()
 
-        pix = self._get_full_crop(idx)
-        if pix is None or pix.isNull():
-            self._ocr_spine_results.append({
-                "spine_idx": idx,
-                "book_name": "未识别",
-                "matched_name": None,
-                "score": 0.0,
-                "strategy": "skip",
-                "needs_review": False,
-            })
-            self._ocr_spine_idx += 1
-            self._ocr_next_spine()
-            return
-
-        tmp_path = Path(tempfile.mktemp(suffix=".png"))
-        pix.save(str(tmp_path), "PNG")
-        self._run_worker(api_ocr_spine, tmp_path)
-
-    def _on_ocr_done(self, result: dict) -> None:
-        idx = self._ocr_spine_idx
-        tmp_to_clean = self._worker._args[0] if self._worker else None
-
-        result["spine_idx"] = idx
-        self._ocr_spine_results.append(result)
-        self._ocr_spine_idx += 1
-
-        if tmp_to_clean and Path(tmp_to_clean).exists():
-            Path(tmp_to_clean).unlink(missing_ok=True)
-
-        self._ocr_next_spine()
+        if self._ocr_completed >= self._ocr_pending:
+            self._on_ocr_all_done()
+        else:
+            # 启动下一个 worker（保持并发数）
+            self._launch_ocr_worker()
 
     def _on_ocr_all_done(self) -> None:
+        # 清理 workers（防 QThread GC 崩溃）
+        for w in getattr(self, '_ocr_workers', []):
+            try: w.wait(100)
+            except: pass
+        self._ocr_workers.clear()
+
         self._set_busy(False)
         results = self._ocr_spine_results
+
+        ocr_count = sum(1 for r in results if r and r.get("strategy") != "skip_conf")
+        skip_count = sum(1 for r in results if r and r.get("strategy") == "skip_conf")
 
         self._ocr_table.setRowCount(len(results))
         for i, r in enumerate(results):
             conf = self._all_detections[i].get("confidence", 0.0) if i < len(self._all_detections) else 0
+            is_skipped = r.get("strategy") == "skip_conf"
+
             items = [
                 QTableWidgetItem(str(i + 1)),
                 QTableWidgetItem(f"{conf:.4f}"),
@@ -1328,55 +1406,179 @@ class MainWindow(QMainWindow):
             ]
             items[0].setTextAlignment(Qt.AlignCenter)
             items[1].setTextAlignment(Qt.AlignCenter)
+            if is_skipped:
+                items[0].setForeground(QColor("#888888"))
+                items[1].setForeground(QColor("#888888"))
             for col, it in enumerate(items):
                 self._ocr_table.setItem(i, col, it)
 
-        self._btn_match.setEnabled(len(results) > 0)
+        self._btn_match.setEnabled(ocr_count > 0)
         self._has_unsaved = True
         self._tabs.setCurrentIndex(2)
-        self._status_bar.showMessage(f"OCR 完成: {len(results)} 个书脊 — 点击「📊 评估对比」查看准确率")
+        self._status_bar.showMessage(f"OCR 完成: {ocr_count} 个识别 / {skip_count} 个跳过")
+
+        # 有失败/超时条目的启用重试按钮
+        has_fail = any(r and r.get("strategy") in ("error", "skip") and r.get("book_name","").startswith(("错误","未识别"))
+                       for r in results)
+        self._btn_retry_fail.setEnabled(has_fail)
 
     def _on_evaluate(self) -> None:
+        try:
+            self._do_evaluate()
+        except Exception as e:
+            self._status_bar.showMessage(f"评估失败: {e}")
+            self._set_busy(False)
+
+    def _do_evaluate(self) -> None:
         if not hasattr(self, "_ocr_spine_results") or not self._ocr_spine_results:
             QMessageBox.information(self, "提示", "请先执行 OCR 识别")
             return
 
         photo_id = self._current_image.stem if self._current_image else ""
-        gt_path = GROUND_TRUTH_DIR / f"{photo_id}.json"
+        gt_path = BOOK_LABELS_DIR / f"{photo_id}.json"
         if not gt_path.exists():
-            QMessageBox.information(self, "提示", f"评判标准文件不存在: {gt_path.name}\n请先运行 create_ground_truth")
+            QMessageBox.information(self, "提示", f"书名标注文件不存在: {gt_path.name}")
             return
 
-        gt_data = json.loads(gt_path.read_text(encoding="utf-8"))
+        gt_raw = json.loads(gt_path.read_text(encoding="utf-8"))
+        # book_labels 用 "name"/"matched_name" 字段
+        gt_data = {"books": []}
+        for b in gt_raw.get("books", []):
+            gt_data["books"].append({
+                "original_ocr_name": b.get("name", ""),
+                "matched_name": b.get("matched_name"),
+                "count": b.get("count", 1),
+            })
+
         eval_result = evaluate_vs_ground_truth(self._ocr_spine_results, gt_data)
+        self._eval_per_spine = eval_result["per_spine"]  # 存下来供 retry_extra 用
 
         summary = eval_result["summary"]
+        acc = summary["accuracy"] * 100
+        skipped_info = f" | 跳过(阈值以下) <b>{summary.get('skipped',0)}</b>" if summary.get("skipped", 0) > 0 else ""
         self._lbl_ocr_summary.setText(
-            f"准确率 <b>{summary['accuracy']*100:.1f}%</b> "
+            f"准确率 <b>{acc:.1f}%</b> "
             f"({summary['correct']}/{summary['total_gt']} 正确) | "
             f"漏检 <b>{summary['missed']}</b> | "
             f"多检 <b>{summary['extra']}</b>"
+            f"{skipped_info}"
         )
 
         for i, ps in enumerate(eval_result["per_spine"]):
-            gt_item = QTableWidgetItem(ps.get("gt_name") or "—")
-            result_text = ps.get("result", "")
-            if result_text == "correct":
+            result = ps.get("result", "")
+            gt_name = ps.get("gt_name")
+            score = ps.get("gt_score", 0.0)
+
+            if result == "correct":
                 result_text = "✓"
-                gt_item.setForeground(COLOR_HIGH_CONF)
-            elif result_text == "missed":
-                result_text = "✗ 漏检"
-                gt_item.setForeground(COLOR_LOW_CONF)
+                gt_display = gt_name or "—"
+                color = COLOR_HIGH_CONF
+            elif result == "skipped":
+                result_text = "—"
+                gt_display = "已跳过"
+                color = QColor("#888888")
             else:
                 result_text = "✗ 多检"
-                gt_item.setForeground(COLOR_LOW_CONF)
+                gt_display = f"最高: {gt_name} ({score:.2f})" if gt_name else "—"
+                color = COLOR_LOW_CONF
+
+            gt_item = QTableWidgetItem(gt_display)
+            gt_item.setForeground(color)
+
             result_item = QTableWidgetItem(result_text)
             result_item.setTextAlignment(Qt.AlignCenter)
+            result_item.setForeground(color)
             self._ocr_table.setItem(i, 4, gt_item)
             self._ocr_table.setItem(i, 5, result_item)
 
-        self._tabs.setCurrentIndex(2)
-        self._status_bar.showMessage(f"评估完成: 准确率 {summary['accuracy']*100:.1f}%")
+        # 填充评估详情 tab
+        self._match_table.setRowCount(len(eval_result["per_spine"]))
+        for i, ps in enumerate(eval_result["per_spine"]):
+            result = ps.get("result", "")
+            gt_name = ps.get("gt_name", "")
+            gt_matched = ps.get("gt_matched", "")
+            score = ps.get("gt_score", 0.0)
+            ocr_name = ps.get("ocr_name", "")
+            matched = ps.get("matched_name", "")
+            match_round = ps.get("match_round", "")
+
+            if result == "correct":
+                result_text = "✓"
+                color = COLOR_HIGH_CONF
+            elif result == "skipped":
+                result_text = "—"
+                color = QColor("#888888")
+            else:
+                result_text = "✗"
+                color = COLOR_LOW_CONF
+
+            for col, (text, c) in enumerate([
+                (str(i + 1), None),
+                (ocr_name, None),
+                (matched or "—", None),
+                (gt_name or "—", color),
+                (gt_matched or "—", None),
+                (f"{score:.4f}", None),
+                (result_text, color),
+            ]):
+                item = QTableWidgetItem(text)
+                item.setTextAlignment(Qt.AlignCenter if col in (0, 5, 6) else Qt.AlignLeft)
+                if c: item.setForeground(c)
+                self._match_table.setItem(i, col, item)
+
+        self._lbl_match_summary.setText(
+            f"准确率 <b>{acc:.1f}%</b> ({summary['correct']}/{summary['total_gt']}) | "
+            f"漏检 <b>{summary['missed']}</b> | 多检 <b>{summary['extra']}</b>"
+            f"{skipped_info}"
+        )
+        self._tabs.setCurrentIndex(3)  # 切到评估详情 tab
+
+        # 启用重试按钮
+        has_fail = any(r and r.get("strategy") in ("error", "skip") and r.get("book_name","").startswith(("错误","未识别"))
+                       for r in (self._ocr_spine_results or []))
+        self._btn_retry_fail.setEnabled(has_fail)
+        # 多检: result="extra" 的
+        if hasattr(self, '_eval_per_spine'):
+            has_extra = any(ps.get("result") == "extra" for ps in self._eval_per_spine)
+            self._btn_retry_extra.setEnabled(has_extra)
+
+    def _on_retry_fail(self) -> None:
+        """重试失败/超时的脊柱。"""
+        try:
+            retry = []
+            for i, r in enumerate(self._ocr_spine_results or []):
+                if r and r.get("strategy") in ("error", "skip") and r.get("book_name","").startswith(("错误","未识别")):
+                    retry.append(i)
+            if retry:
+                self._on_ocr(spine_indices=retry)
+        except Exception as e:
+            self._status_bar.showMessage(f"重试失败: {e}")
+            self._set_busy(False)
+
+    def _on_retry_extra(self) -> None:
+        """重试评估为多检(extra)的脊柱。"""
+        try:
+            if not hasattr(self, '_eval_per_spine'):
+                return
+            retry = [ps["spine_idx"] for ps in self._eval_per_spine if ps.get("result") == "extra"]
+            if retry:
+                self._on_ocr(spine_indices=retry)
+        except Exception as e:
+            self._status_bar.showMessage(f"重试失败: {e}")
+            self._set_busy(False)
+
+    def _on_ocr_cell_double_click(self, row: int, col: int) -> None:
+        """双击 OCR 表行 → 单独重试该脊柱。"""
+        try:
+            if row < 0 or row >= len(self._all_detections):
+                return
+            reply = QMessageBox.question(self, "重试", f"单独重试第 {row+1} 号书脊？",
+                                          QMessageBox.Yes | QMessageBox.No)
+            if reply == QMessageBox.Yes:
+                self._on_ocr(spine_indices=[row])
+        except Exception as e:
+            self._status_bar.showMessage(f"重试失败: {e}")
+            self._set_busy(False)
 
     # ==================================================================
     # slot: match
@@ -1694,7 +1896,7 @@ class MainWindow(QMainWindow):
         self._ocr_table.setRowCount(0)
         self._lbl_ocr_summary.setText("尚未 OCR 识别")
         self._match_table.setRowCount(0)
-        self._lbl_match_summary.setText("尚未匹配")
+        self._lbl_match_summary.setText("OCR 完成后点击「📊 评估对比」查看详情")
         self._btn_segment.setEnabled(True)
         self._btn_ocr.setEnabled(False)
         self._btn_match.setEnabled(False)
@@ -1749,7 +1951,8 @@ class MainWindow(QMainWindow):
     # ==================================================================
 
     def _set_busy(self, busy: bool, msg: str = "") -> None:
-        for btn in [self._btn_open, self._btn_segment, self._btn_ocr, self._btn_match, self._btn_save]:
+        for btn in [self._btn_open, self._btn_segment, self._btn_ocr, self._btn_match, self._btn_save,
+                     self._btn_retry_fail, self._btn_retry_extra]:
             btn.setEnabled(not busy)
         if msg:
             self._status_bar.showMessage(msg)
@@ -1763,21 +1966,19 @@ class MainWindow(QMainWindow):
         self._worker.start()
 
     def _on_worker_result(self, result):
-        w = self._worker
-        if w is None:
-            return
-        fn = w._fn  # noqa: private access, intentional
-        if fn is api_segment:
-            self._on_segment_done(result)
-        elif fn is api_ocr_spine:
-            self._on_ocr_done(result)
-        elif fn is api_inventory:
-            self._on_match_done(result)
+        try:
+            w = self._worker
+            if w is None: return
+            fn = w._fn  # noqa
+            if fn is api_segment: self._on_segment_done(result)
+            elif fn is api_inventory: self._on_match_done(result)
+        except Exception: pass
 
     def _on_worker_error(self, err: str):
-        self._set_busy(False)
-        QMessageBox.warning(self, "API 错误", err)
-        self._status_bar.showMessage(f"错误: {err}")
+        try:
+            self._set_busy(False)
+            self._status_bar.showMessage(f"错误: {err}")
+        except Exception: pass
 
     # ==================================================================
     # close

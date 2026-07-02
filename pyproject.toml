@@ -21,6 +21,7 @@ dependencies = [
     "uvicorn[standard]>=0.30",
     "python-multipart>=0.0.9",
     "rapidfuzz>=3.0",
+    "jieba",
 ]
 
 [project.optional-dependencies]

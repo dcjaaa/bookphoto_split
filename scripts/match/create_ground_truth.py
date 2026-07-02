@@ -26,7 +26,7 @@ from scripts.match.inventory import fuzzy_match, load_catalog, build_catalog_ind
 from scripts.utils.paths import OCR_RESULTS_DIR, GROUND_TRUTH_DIR
 
 
-def create_ground_truth(threshold: float = 0.7) -> None:
+def create_ground_truth(threshold: float = 0.7, start: int | None = None, end: int | None = None, no_overwrite: bool = False) -> None:
     if not OCR_RESULTS_DIR.exists():
         print(f"Error: {OCR_RESULTS_DIR} not found.")
         print("  Run: python -m scripts.ocr.qwen_pipeline to generate OCR results first")
@@ -40,6 +40,19 @@ def create_ground_truth(threshold: float = 0.7) -> None:
     GROUND_TRUTH_DIR.mkdir(parents=True, exist_ok=True)
 
     ocr_files = sorted(OCR_RESULTS_DIR.glob("*.json"), key=lambda f: int(f.stem))
+
+    if start is not None:
+        ocr_files = [f for f in ocr_files if int(f.stem) >= start]
+    if end is not None:
+        ocr_files = [f for f in ocr_files if int(f.stem) <= end]
+
+    if no_overwrite:
+        ocr_files = [f for f in ocr_files if not (GROUND_TRUTH_DIR / f.name).exists()]
+
+    if not ocr_files:
+        print("No OCR files to process (可能已被跳过或范围无数据)")
+        return
+
     total_confirmed = 0
     total_review = 0
     total_unmatched = 0
@@ -124,5 +137,8 @@ def create_ground_truth(threshold: float = 0.7) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="从OCR结果生成测评基准(ground truth)")
     parser.add_argument("--threshold", type=float, default=0.7, help="模糊匹配阈值 (0-1)")
+    parser.add_argument("--start", type=int, default=None, help="起始图片 ID")
+    parser.add_argument("--end", type=int, default=None, help="结束图片 ID")
+    parser.add_argument("--no-overwrite", action="store_true", help="跳过已有 ground_truth 文件")
     args = parser.parse_args()
-    create_ground_truth(args.threshold)
+    create_ground_truth(args.threshold, start=args.start, end=args.end, no_overwrite=args.no_overwrite)
